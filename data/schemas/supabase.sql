@@ -71,3 +71,28 @@ CREATE TABLE IF NOT EXISTS policies (
     human_approval_required BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ─── Postgres role grants ────────────────────────────────────────────────────
+-- service_role: used by PayBack backend (bypasses RLS, still needs GRANT)
+GRANT ALL ON public.customers       TO service_role;
+GRANT ALL ON public.transactions    TO service_role;
+GRANT ALL ON public.recovery_cases  TO service_role;
+GRANT ALL ON public.action_records  TO service_role;
+GRANT ALL ON public.audit_records   TO service_role;
+GRANT ALL ON public.policies        TO service_role;
+
+-- authenticated: used by logged-in users if a frontend is added later
+GRANT ALL ON public.customers       TO authenticated;
+GRANT ALL ON public.transactions    TO authenticated;
+GRANT ALL ON public.recovery_cases  TO authenticated;
+GRANT ALL ON public.action_records  TO authenticated;
+GRANT ALL ON public.audit_records   TO authenticated;
+GRANT ALL ON public.policies        TO authenticated;
+
+-- anon: read-only for schema introspection (PostgREST)
+GRANT SELECT ON public.customers       TO anon;
+GRANT SELECT ON public.transactions    TO anon;
+GRANT SELECT ON public.recovery_cases  TO anon;
+GRANT SELECT ON public.action_records  TO anon;
+GRANT SELECT ON public.audit_records   TO anon;
+GRANT SELECT ON public.policies        TO anon;
