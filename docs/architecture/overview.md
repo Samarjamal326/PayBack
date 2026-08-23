@@ -1,124 +1,110 @@
-# PayBack — Architecture Overview (Phase 1)
+# PayBack — Architecture Overview (Phase 2)
 
 ## System Components
 
 ```
 PayBack
-├── API layer          FastAPI routes — thin, no business logic
-├── Service layer      RecoveryService — application orchestration
-├── Agent layer        LangGraph workflow — node-based state transitions
+├── API layer          FastAPI routes — thin, webhook verification & route dispatch
+├── Service layer      RecoveryService — application orchestration & audit trail
+├── Repositories       Clean repository abstraction (InMemory & Supabase REST)
+├── Agent layer        LangGraph workflow — state transitions
 ├── Core layer         Decision engine + state machine — deterministic rules
-├── Models layer       Domain models and enums — Pydantic v2
+├── Models layer       Domain models, enums & audit records — Pydantic v2
 └── Services layer
-    ├── Actions        Provider interfaces + stubs + executor
-    └── LLM            MessageGenerator interface + mock
+    ├── Actions        Razorpay Test Mode provider + stubs + executor
+    ├── Razorpay       Webhook signature verification & event processing
+    └── LLM            HuggingFaceMessageGenerator + Mock fallback
 ```
 
-## Recovery Flow
+## Complete Recovery Loop
 
 ```
-POST /events/payment
+Razorpay Test Payment Failed
         │
         ▼
-RecoveryService.ingest_payment_event()
+POST /api/v1/events/payment
         │
         ▼
-RecoveryCase created (status: DETECTED)
-
-POST /recovery
+RecoveryService.ingest_payment_event()  ──► AuditRecord(PAYMENT_FAILED)
+        │                               ──► AuditRecord(RECOVERY_CASE_CREATED)
+        ▼
+RecoveryCase (status: DETECTED)
         │
         ▼
-RecoveryService.run_recovery()
+POST /api/v1/recovery ──► RecoveryService.run_recovery()
         │
         ▼
 LangGraph graph.invoke(RecoveryState)
         │
-  ┌─────┴────────────────────────────────────────┐
-  │                                              │
-  ▼                                              │
-analyze → check_eligibility → decide            │
-                    │                            │
-          ┌─────────┼──────────┐                 │
-          ▼         ▼          ▼                 │
-       recover   escalate    stop                │
-          │                                      │
-          ▼                                      │
-   execute_action → monitor → stop/escalate ─────┘
+analyze ──► check_eligibility ──► decide (Decision Engine)
+                                    │
+                              [RECOVER action]
+                                    │
+                                    ▼
+                      Razorpay Test Payment Link created
+                                    │
+                        Status: MONITORING
+                                    │
+         Customer completes test payment on simulated link
+                                    │
+                                    ▼
+POST /api/v1/events/webhook/razorpay (verified with HMAC-SHA256)
+        │
+        ▼
+process_razorpay_webhook_event() (event: payment_link.paid)
+        │
+        ▼
+RecoveryService.mark_case_recovered()
+        │
+        ├──► RecoveryCase.status = RECOVERED
+        ├──► RecoveryCase.outcome = RECOVERED
+        ├──► RecoveryCase.amount_recovered = exact amount (INR)
+        ├──► AuditRecord(PAYMENT_SUCCEEDED)
+        └──► AuditRecord(RECOVERY_COMPLETED)
 ```
+
+## Zero-Cost Safety Guarantees
+
+1. **Razorpay Test Mode Only**:
+   - `rzp_test_` keys allowed only.
+   - `rzp_live_` keys are strictly rejected at startup and execution time (`LiveKeyForbiddenError`).
+   - No real transactions, cards, or accounts are charged.
+2. **Supabase Free Tier / In-Memory Flexibility**:
+   - Free PostgreSQL REST PostgREST client without heavy external SDK overhead.
+   - Defaults to in-memory repositories for local dev/testing without database credentials.
+3. **Hugging Face Free Tier / Mock Fallback**:
+   - Prompt-based message generation using free/open models (`mistralai/Mistral-7B-Instruct-v0.2`).
+   - Cleanly falls back to `MockMessageGenerator` when no API key is supplied.
+   - The LLM never makes financial or recovery decisions.
 
 ## Domain Model
 
-| Model         | Purpose                                               |
-|---------------|-------------------------------------------------------|
-| Customer      | Merchant's customer with opt-out flag                 |
-| Transaction   | Payment event with status and failure reason          |
-| RecoveryCase  | Recovery opportunity linked to a transaction          |
-| ActionRecord  | Audit trail of every executed action                  |
-| Policy        | Merchant-defined limits (retries, window, thresholds) |
-
-All statuses and decisions are typed enums — no raw strings in business logic.
-
-## Decision Engine Responsibility
-
-`app/core/decision.py` — fully deterministic, no LLM.
-
-Evaluates in this priority order:
-1. Customer opt-out → STOP
-2. Recovery window expired → STOP
-3. Max retries reached → STOP
-4. Max messages sent → STOP
-5. Transaction already succeeded → STOP
-6. High-value threshold exceeded → ESCALATE
-7. Policy requires human approval → ESCALATE
-8. Transaction not in recoverable status → STOP
-9. All conditions clear → RECOVER
-
-## LangGraph Responsibility
-
-`app/agent/` — workflow orchestration only.
-
-Nodes are thin: they call the decision engine and action executor.
-No business rules live inside nodes.
+| Model         | Purpose                                                 |
+|---------------|---------------------------------------------------------|
+| Customer      | Merchant's customer with opt-out flag                   |
+| Transaction   | Commercial payment event with status and failure reason |
+| RecoveryCase  | Recovery opportunity with status, outcome, amount       |
+| ActionRecord  | Record of executed actions with external link refs      |
+| AuditRecord   | Complete chronological audit trail for every case       |
+| Policy        | Merchant limits (retries, window, thresholds)           |
 
 ## API Boundaries
 
 ```
-POST /api/v1/events/payment     Ingest a payment event
-POST /api/v1/recovery           Start recovery for a case
-GET  /api/v1/recovery/{id}      Get current case state
-GET  /api/v1/recovery/{id}/actions  Get action history
+GET  /api/v1/health                    Health & Test Mode status check
+POST /api/v1/events/payment            Ingest a payment failure event
+POST /api/v1/events/webhook/razorpay   Verified Razorpay webhook receiver
+POST /api/v1/recovery                  Start recovery workflow
+GET  /api/v1/recovery/{id}             Get case state & outcome
+GET  /api/v1/recovery/{id}/actions     Get executed action history
+GET  /api/v1/recovery/{id}/audit       Get full chronological audit trail
 ```
 
-## External Integration Boundaries
+## Intentionally Deferred to Phase 3
 
-### Razorpay (Phase 2)
-- `PaymentActionProvider` interface in `app/services/actions/interfaces.py`
-- Will receive: Razorpay webhook → `POST /events/payment`
-- Will call: Razorpay API for payment links and retries
-
-### Messaging — WhatsApp / Email (Phase 2)
-- `MessagingProvider` interface in `app/services/actions/interfaces.py`
-- Providers are injected into `ActionExecutor`
-
-### LLM — Hugging Face (Phase 2)
-- `MessageGenerator` interface in `app/services/llm/interface.py`
-- `MockMessageGenerator` used in Phase 1 tests
-
-### Database — Supabase (Phase 2)
-- `RecoveryService` currently uses in-memory dicts
-- Replace with repository classes that implement the same read/write interface
-- Domain models are already persistence-independent (plain Pydantic)
-
-## Intentionally Deferred
-
-- Real Razorpay API integration
-- WhatsApp (Twilio / Meta) integration
-- Email (SES / SendGrid) integration
-- Real Hugging Face API calls
-- ML recovery probability model
-- Supabase PostgreSQL persistence
-- Authentication / authorization
-- Frontend
-- RAG / vector database
-- Deployment / containerization
-- Analytics
+- Production WhatsApp API (Meta Cloud / Twilio)
+- Production Email API (Amazon SES / SendGrid)
+- ML recovery probability scoring model
+- Authentication / merchant login
+- Frontend user interface
+- Analytics & merchant reporting dashboard

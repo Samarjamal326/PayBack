@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Optional
 
 from app.models.domain import RecoveryOutcome
 
@@ -10,23 +11,30 @@ from app.models.domain import RecoveryOutcome
 class ActionResult:
     outcome: RecoveryOutcome
     detail: str
-    external_ref: str | None = None  # e.g., Razorpay payment link ID
+    external_ref: str | None = None  # e.g., Razorpay payment link URL / ID
 
 
 class PaymentActionProvider(ABC):
-    """Razorpay integration slot. Stub in Phase 1."""
+    """Razorpay integration slot."""
 
     @abstractmethod
     def retry_payment(self, transaction_id: str, amount: float) -> ActionResult:
         ...
 
     @abstractmethod
-    def create_payment_link(self, transaction_id: str, amount: float, customer_email: str) -> ActionResult:
+    def create_payment_link(
+        self,
+        transaction_id: str,
+        amount: float,
+        customer_email: str,
+        customer_phone: Optional[str] = None,
+        customer_name: Optional[str] = None,
+    ) -> ActionResult:
         ...
 
 
 class MessagingProvider(ABC):
-    """WhatsApp / email integration slot. Stub in Phase 1."""
+    """WhatsApp / email integration slot."""
 
     @abstractmethod
     def send_whatsapp(self, phone: str, message: str) -> ActionResult:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 
 def _now() -> datetime:
-    from datetime import timezone
     return datetime.now(timezone.utc)
 
 
@@ -96,6 +95,19 @@ class EscalateReason(str, Enum):
     AMBIGUOUS = "ambiguous_situation"
 
 
+class AuditEventType(str, Enum):
+    PAYMENT_FAILED = "PAYMENT_FAILED"
+    RECOVERY_CASE_CREATED = "RECOVERY_CASE_CREATED"
+    ELIGIBILITY_CHECKED = "ELIGIBILITY_CHECKED"
+    DECISION_MADE = "DECISION_MADE"
+    ACTION_SELECTED = "ACTION_SELECTED"
+    PAYMENT_LINK_CREATED = "PAYMENT_LINK_CREATED"
+    PAYMENT_SUCCEEDED = "PAYMENT_SUCCEEDED"
+    RECOVERY_COMPLETED = "RECOVERY_COMPLETED"
+    RECOVERY_STOPPED = "RECOVERY_STOPPED"
+    RECOVERY_ESCALATED = "RECOVERY_ESCALATED"
+
+
 # ---------------------------------------------------------------------------
 # Domain models
 # ---------------------------------------------------------------------------
@@ -142,6 +154,8 @@ class RecoveryCase(BaseModel):
     decision: Optional[RecoveryDecision] = None
     stop_reason: Optional[StopReason] = None
     escalate_reason: Optional[EscalateReason] = None
+    outcome: Optional[RecoveryOutcome] = None
+    amount_recovered: float = 0.0
     retry_count: int = 0
     message_count: int = 0
     created_at: datetime = Field(default_factory=_now)
@@ -154,4 +168,13 @@ class ActionRecord(BaseModel):
     action: RecoveryAction
     outcome: Optional[RecoveryOutcome] = None
     detail: Optional[str] = None
+    external_ref: Optional[str] = None
     executed_at: datetime = Field(default_factory=_now)
+
+
+class AuditRecord(BaseModel):
+    id: str = Field(default_factory=_uuid)
+    recovery_case_id: str
+    event_type: AuditEventType
+    detail: str
+    created_at: datetime = Field(default_factory=_now)

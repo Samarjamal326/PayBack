@@ -1,7 +1,7 @@
--- PayBack — Supabase PostgreSQL Schema (Phase 2 target)
--- Not executed in Phase 1. Defines the intended production data model.
+-- PayBack — Supabase PostgreSQL Schema (Phase 2)
+-- Designed for Supabase free-tier PostgreSQL database.
 
-CREATE TABLE customers (
+CREATE TABLE IF NOT EXISTS customers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     external_id TEXT,
     name TEXT NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE customers (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE transactions (
+CREATE TABLE IF NOT EXISTS transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     customer_id UUID NOT NULL REFERENCES customers(id),
     amount NUMERIC(12, 2) NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE transactions (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE recovery_cases (
+CREATE TABLE IF NOT EXISTS recovery_cases (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     transaction_id UUID NOT NULL REFERENCES transactions(id),
     customer_id UUID NOT NULL REFERENCES customers(id),
@@ -35,22 +35,33 @@ CREATE TABLE recovery_cases (
     decision TEXT,
     stop_reason TEXT,
     escalate_reason TEXT,
+    outcome TEXT,
+    amount_recovered NUMERIC(12, 2) NOT NULL DEFAULT 0,
     retry_count INTEGER NOT NULL DEFAULT 0,
     message_count INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE action_records (
+CREATE TABLE IF NOT EXISTS action_records (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     recovery_case_id UUID NOT NULL REFERENCES recovery_cases(id),
     action TEXT NOT NULL,
     outcome TEXT,
     detail TEXT,
+    external_ref TEXT,
     executed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE policies (
+CREATE TABLE IF NOT EXISTS audit_records (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    recovery_case_id UUID NOT NULL REFERENCES recovery_cases(id),
+    event_type TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS policies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id TEXT NOT NULL,
     maximum_retries INTEGER NOT NULL DEFAULT 3,

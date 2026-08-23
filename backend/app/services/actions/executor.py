@@ -49,6 +49,7 @@ class ActionExecutor:
             action=action,
             outcome=result.outcome,
             detail=result.detail,
+            external_ref=result.external_ref,
         )
 
     def _dispatch(
@@ -71,7 +72,11 @@ class ActionExecutor:
 
         if action == RecoveryAction.CREATE_PAYMENT_LINK:
             result = self._payment.create_payment_link(
-                transaction.id, transaction.amount, customer.email or ""
+                transaction_id=transaction.id,
+                amount=transaction.amount,
+                customer_email=customer.email or "",
+                customer_phone=customer.phone,
+                customer_name=customer.name,
             )
             ctx = MessageContext(
                 customer_name=customer.name,

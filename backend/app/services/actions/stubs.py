@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Optional
 from app.models.domain import RecoveryOutcome
 from app.services.actions.interfaces import (
     ActionResult,
@@ -10,7 +11,7 @@ from app.services.actions.interfaces import (
 
 
 class StubPaymentProvider(PaymentActionProvider):
-    """No-op Razorpay stub. Replace with real implementation in Phase 2."""
+    """No-op Razorpay stub. Safe for tests."""
 
     def retry_payment(self, transaction_id: str, amount: float) -> ActionResult:
         return ActionResult(
@@ -18,16 +19,23 @@ class StubPaymentProvider(PaymentActionProvider):
             detail=f"[stub] retry_payment called for tx={transaction_id}",
         )
 
-    def create_payment_link(self, transaction_id: str, amount: float, customer_email: str) -> ActionResult:
+    def create_payment_link(
+        self,
+        transaction_id: str,
+        amount: float,
+        customer_email: str,
+        customer_phone: Optional[str] = None,
+        customer_name: Optional[str] = None,
+    ) -> ActionResult:
         return ActionResult(
             outcome=RecoveryOutcome.FAILED,
             detail=f"[stub] create_payment_link called for tx={transaction_id}",
-            external_ref="https://rzp.io/stub/link",
+            external_ref="https://rzp.io/i/stub_test_link",
         )
 
 
 class StubMessagingProvider(MessagingProvider):
-    """No-op messaging stub. Replace with WhatsApp/email providers in Phase 2."""
+    """No-op messaging stub."""
 
     def send_whatsapp(self, phone: str, message: str) -> ActionResult:
         return ActionResult(

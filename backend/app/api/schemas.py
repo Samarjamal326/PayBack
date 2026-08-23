@@ -6,7 +6,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from app.models.domain import (
-    ActionRecord,
+    AuditEventType,
     Currency,
     EscalateReason,
     PaymentMethod,
@@ -50,10 +50,12 @@ class RecoveryCaseResponse(BaseModel):
     reason: str
     status: RecoveryStatus
     recovery_probability: float
-    decision: Optional[RecoveryDecision]
-    selected_action: Optional[RecoveryAction]
-    stop_reason: Optional[StopReason]
-    escalate_reason: Optional[EscalateReason]
+    decision: Optional[RecoveryDecision] = None
+    selected_action: Optional[RecoveryAction] = None
+    stop_reason: Optional[StopReason] = None
+    escalate_reason: Optional[EscalateReason] = None
+    outcome: Optional[RecoveryOutcome] = None
+    amount_recovered: float = 0.0
     retry_count: int
     message_count: int
     created_at: datetime
@@ -64,6 +66,28 @@ class ActionRecordResponse(BaseModel):
     id: str
     recovery_case_id: str
     action: RecoveryAction
-    outcome: Optional[RecoveryOutcome]
-    detail: Optional[str]
+    outcome: Optional[RecoveryOutcome] = None
+    detail: Optional[str] = None
+    external_ref: Optional[str] = None
     executed_at: datetime
+
+
+class AuditRecordResponse(BaseModel):
+    id: str
+    recovery_case_id: str
+    event_type: AuditEventType
+    detail: str
+    created_at: datetime
+
+
+class WebhookResponse(BaseModel):
+    status: str
+    message: str
+    event: Optional[str] = None
+    case_id: Optional[str] = None
+
+
+class HealthResponse(BaseModel):
+    status: str
+    app_env: str
+    razorpay_mode: str

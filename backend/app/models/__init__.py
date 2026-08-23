@@ -1,5 +1,7 @@
 from .domain import (
     ActionRecord,
+    AuditEventType,
+    AuditRecord,
     Currency,
     Customer,
     EscalateReason,
@@ -17,6 +19,8 @@ from .domain import (
 
 __all__ = [
     "ActionRecord",
+    "AuditEventType",
+    "AuditRecord",
     "Currency",
     "Customer",
     "EscalateReason",
