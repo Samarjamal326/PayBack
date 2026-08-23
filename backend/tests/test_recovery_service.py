@@ -32,6 +32,7 @@ class TestRecoveryWorkflow:
             RecoveryStatus.STOPPED,
             RecoveryStatus.ESCALATED,
             RecoveryStatus.RECOVERED,
+            RecoveryStatus.MONITORING,
         )
 
     def test_opted_out_customer_case_is_stopped(self, failed_transaction, opted_out_customer):

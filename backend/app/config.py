@@ -4,7 +4,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(".env", "../.env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     # Environment
     app_env: str = "development"
@@ -28,6 +32,9 @@ class Settings(BaseSettings):
 
     def is_razorpay_configured(self) -> bool:
         return bool(self.razorpay_key_id and self.razorpay_key_secret)
+
+    def is_supabase_configured(self) -> bool:
+        return bool(self.supabase_url and (self.supabase_service_role_key or self.supabase_anon_key))
 
     def validate_razorpay_test_mode(self) -> bool:
         """

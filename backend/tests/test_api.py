@@ -49,7 +49,7 @@ class TestRecoveryEndpoints:
         resp = client.post("/api/v1/recovery", json={"case_id": case["id"]})
         assert resp.status_code == 202
         body = resp.json()
-        assert body["status"] in ("stopped", "escalated", "recovered")
+        assert body["status"] in ("stopped", "escalated", "recovered", "monitoring")
 
     def test_get_case_returns_200(self):
         case = self._create_case()

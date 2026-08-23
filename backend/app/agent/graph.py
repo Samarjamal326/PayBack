@@ -14,7 +14,6 @@ from app.agent.nodes import (
     node_stop,
     route_decision,
     route_eligibility,
-    route_monitor,
 )
 from app.agent.state import RecoveryState
 from app.services.actions.executor import ActionExecutor
@@ -25,9 +24,9 @@ def build_recovery_graph(executor: ActionExecutor) -> StateGraph:
     Constructs the LangGraph recovery workflow.
 
     Graph structure:
-        START → analyze → check_eligibility → decide →(route)→ execute_action → monitor →(route)→ stop/escalate
+        START → analyze → check_eligibility → decide →(route)→ execute_action → monitor → END
                                                       ↓
-                                                 stop / escalate
+                                                 stop / escalate → END
     """
     graph = StateGraph(RecoveryState)
 
@@ -59,13 +58,7 @@ def build_recovery_graph(executor: ActionExecutor) -> StateGraph:
     )
 
     graph.add_edge("execute_action", "monitor")
-
-    graph.add_conditional_edges(
-        "monitor",
-        route_monitor,
-        {"stop": "stop", "escalate": "escalate"},
-    )
-
+    graph.add_edge("monitor", END)
     graph.add_edge("stop", END)
     graph.add_edge("escalate", END)
 
