@@ -1,0 +1,6 @@
+'use client'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { FormEvent, useState } from 'react'
+import { setDemoSession } from '@/lib/demo-session'
+export default function SignUpPage() { const router = useRouter(); const [loading, setLoading] = useState(false); function submit(e: FormEvent<HTMLFormElement>) { e.preventDefault(); setLoading(true); const data = new FormData(e.currentTarget); setDemoSession({ email: String(data.get('email') || 'admin@payback.io'), name: String(data.get('name') || 'Aditi Sharma') }); router.push('/dashboard') } return <main className="auth-page"><div className="auth-card"><Link href="/" className="auth-logo">PayBack</Link><h1>Create your workspace</h1><p>Start recovering more revenue with less effort.</p><form onSubmit={submit}><label>Full name<input name="name" required type="text" placeholder="Aditi Sharma" /></label><label>Work email<input name="email" required type="email" placeholder="you@company.com" /></label><label>Password<input name="password" required minLength={8} type="password" placeholder="At least 8 characters" /></label><button className="button-primary" type="submit" disabled={loading}>{loading ? 'Creating workspace…' : 'Create account'}</button></form><div className="auth-switch">Already have an account? <Link href="/sign-in">Sign in</Link></div></div></main> }
