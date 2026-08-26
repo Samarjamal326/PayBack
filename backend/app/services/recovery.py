@@ -86,6 +86,9 @@ class _ActionHistoryProxy(MutableMapping):
         return 0
 
 
+from app.services.llm.factory import get_message_generator
+
+
 def _default_executor() -> ActionExecutor:
     # Use Razorpay Test Mode provider if test keys are configured, otherwise safe stub
     payment_provider = (
@@ -97,15 +100,7 @@ def _default_executor() -> ActionExecutor:
         else StubPaymentProvider()
     )
 
-    # Use Hugging Face generator if key configured, otherwise mock generator
-    llm_generator = (
-        HuggingFaceMessageGenerator(
-            api_key=settings.huggingface_api_key,
-            model_name=settings.huggingface_model,
-        )
-        if settings.huggingface_api_key
-        else MockMessageGenerator()
-    )
+    llm_generator = get_message_generator(settings)
 
     return ActionExecutor(
         payment=payment_provider,
@@ -113,6 +108,7 @@ def _default_executor() -> ActionExecutor:
         escalation=StubEscalationProvider(),
         message_generator=llm_generator,
     )
+
 
 
 class RecoveryService:

@@ -139,13 +139,25 @@ class SupabaseTransactionRepository(TransactionRepository):
 
 
 class SupabaseRecoveryCaseRepository(RecoveryCaseRepository):
+    # Schema columns supported by Supabase recovery_cases table
+    DB_COLUMNS = {
+        "id", "transaction_id", "customer_id", "amount_at_risk", "reason",
+        "status", "recovery_probability", "selected_action", "decision",
+        "stop_reason", "escalate_reason", "outcome", "amount_recovered",
+        "retry_count", "message_count", "created_at", "updated_at"
+    }
+
     def __init__(self, client: SupabaseClient) -> None:
         self.client = client
 
     def save(self, case: RecoveryCase) -> RecoveryCase:
         data = case.model_dump(mode="json")
-        res = self.client.upsert("recovery_cases", data)
-        return RecoveryCase(**res)
+        # Keep only columns present in Supabase table schema
+        db_data = {k: v for k, v in data.items() if k in self.DB_COLUMNS}
+        res = self.client.upsert("recovery_cases", db_data)
+        # Reconstruct preserving in-memory domain fields
+        return case.model_copy(update={k: res[k] for k in res if hasattr(case, k)})
+
 
     def get(self, case_id: str) -> Optional[RecoveryCase]:
         rows = self.client.select("recovery_cases", {"id": f"eq.{case_id}"})

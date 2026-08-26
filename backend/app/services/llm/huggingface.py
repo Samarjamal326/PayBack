@@ -6,6 +6,7 @@ import httpx
 
 from app.services.llm.interface import MessageContext, MessageGenerator
 from app.services.llm.mock import MockMessageGenerator
+from app.services.llm.validator import MessageValidator
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class HuggingFaceMessageGenerator(MessageGenerator):
     Generates customer-facing messages from structured data only.
     The LLM never makes business or financial decisions.
     Falls back cleanly to MockMessageGenerator if no API key is provided.
+    Outputs are validated by MessageValidator before delivery.
     """
 
     HF_API_BASE = "https://api-inference.huggingface.co/models"
@@ -72,10 +74,7 @@ class HuggingFaceMessageGenerator(MessageGenerator):
         )
 
         generated = self._call_hf(prompt)
-        if generated:
-            return generated
-
-        return self._fallback_generator.whatsapp_message(ctx)
+        return MessageValidator.validate_whatsapp(generated, ctx)
 
     def email_body(self, ctx: MessageContext) -> str:
         prompt = (
@@ -85,7 +84,5 @@ class HuggingFaceMessageGenerator(MessageGenerator):
         )
 
         generated = self._call_hf(prompt)
-        if generated:
-            return generated
+        return MessageValidator.validate_email(generated, ctx)
 
-        return self._fallback_generator.email_body(ctx)

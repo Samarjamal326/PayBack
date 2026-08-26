@@ -48,6 +48,9 @@ class RecoveryContext:
     failure_reason_raw: str
     """Raw failure_reason string from Transaction (free text or structured code)."""
 
+    transaction_status: str = "failed"
+    """Status of transaction ('failed', 'abandoned', etc.)."""
+
     # -----------------------------------------------------------------------
     # From RecoveryCase
     # -----------------------------------------------------------------------
@@ -160,8 +163,10 @@ def recovery_context_from_domain(
         amount=float(transaction.amount),
         payment_method_raw=transaction.payment_method.value,
         failure_reason_raw=transaction.failure_reason or "",
+        transaction_status=transaction.status.value,
         retry_count=int(case.retry_count),
         messages_sent=int(case.message_count),
+
         opted_out=bool(customer.opted_out),
         customer_tenure_days=history.customer_tenure_days,
         days_since_failure=round(days_since, 4),

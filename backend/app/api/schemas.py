@@ -49,7 +49,10 @@ class RecoveryCaseResponse(BaseModel):
     amount_at_risk: float
     reason: str
     status: RecoveryStatus
+    recoverability: Optional[str] = None
     recovery_probability: float
+    expected_value: float = 0.0
+    decision_reason: Optional[str] = None
     decision: Optional[RecoveryDecision] = None
     selected_action: Optional[RecoveryAction] = None
     stop_reason: Optional[StopReason] = None
@@ -60,6 +63,7 @@ class RecoveryCaseResponse(BaseModel):
     message_count: int
     created_at: datetime
     updated_at: datetime
+
 
 
 class ActionRecordResponse(BaseModel):

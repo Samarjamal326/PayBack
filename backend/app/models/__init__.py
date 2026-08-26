@@ -1,12 +1,15 @@
 from .domain import (
+    ActionCandidate,
     ActionRecord,
     AuditEventType,
     AuditRecord,
     Currency,
     Customer,
+    DecisionRecord,
     EscalateReason,
     PaymentMethod,
     Policy,
+    RecoverabilityCategory,
     RecoveryAction,
     RecoveryCase,
     RecoveryDecision,
@@ -18,14 +21,17 @@ from .domain import (
 )
 
 __all__ = [
+    "ActionCandidate",
     "ActionRecord",
     "AuditEventType",
     "AuditRecord",
     "Currency",
     "Customer",
+    "DecisionRecord",
     "EscalateReason",
     "PaymentMethod",
     "Policy",
+    "RecoverabilityCategory",
     "RecoveryAction",
     "RecoveryCase",
     "RecoveryDecision",
@@ -35,3 +41,4 @@ __all__ = [
     "Transaction",
     "TransactionStatus",
 ]
+

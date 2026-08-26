@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -79,6 +79,14 @@ class RecoveryOutcome(str, Enum):
     STOPPED = "stopped"
 
 
+class RecoverabilityCategory(str, Enum):
+    HIGHLY_RECOVERABLE = "highly_recoverable"
+    LIKELY_RECOVERABLE = "likely_recoverable"
+    UNCERTAIN = "uncertain"
+    LOW_RECOVERY_PROBABILITY = "low_recovery_probability"
+    NON_RECOVERABLE = "non_recoverable"
+
+
 class StopReason(str, Enum):
     OPT_OUT = "customer_opted_out"
     WINDOW_EXPIRED = "recovery_window_expired"
@@ -97,10 +105,14 @@ class EscalateReason(str, Enum):
 
 class AuditEventType(str, Enum):
     PAYMENT_FAILED = "PAYMENT_FAILED"
+    PAYMENT_ABANDONED = "PAYMENT_ABANDONED"
     RECOVERY_CASE_CREATED = "RECOVERY_CASE_CREATED"
     ELIGIBILITY_CHECKED = "ELIGIBILITY_CHECKED"
+    RECOVERABILITY_CLASSIFIED = "RECOVERABILITY_CLASSIFIED"
+    RECOVERY_SCORED = "RECOVERY_SCORED"
     DECISION_MADE = "DECISION_MADE"
     ACTION_SELECTED = "ACTION_SELECTED"
+    ACTION_EXECUTED = "ACTION_EXECUTED"
     PAYMENT_LINK_CREATED = "PAYMENT_LINK_CREATED"
     PAYMENT_SUCCEEDED = "PAYMENT_SUCCEEDED"
     RECOVERY_COMPLETED = "RECOVERY_COMPLETED"
@@ -140,6 +152,37 @@ class Policy(BaseModel):
     recovery_window_hours: int = 72
     high_value_threshold: float = 10_000.0
     human_approval_required: bool = False
+    action_costs: dict[str, float] = Field(default_factory=lambda: {
+        RecoveryAction.RETRY_PAYMENT.value: 2.0,
+        RecoveryAction.CREATE_PAYMENT_LINK.value: 5.0,
+        RecoveryAction.SEND_WHATSAPP.value: 1.0,
+        RecoveryAction.SEND_EMAIL.value: 0.2,
+        RecoveryAction.ESCALATE.value: 15.0,
+        RecoveryAction.STOP.value: 0.0,
+    })
+
+
+class ActionCandidate(BaseModel):
+    action: RecoveryAction
+    probability: float
+    expected_value: float
+    cost: float
+    eligible: bool = True
+    ineligible_reason: Optional[str] = None
+
+
+class DecisionRecord(BaseModel):
+    recoverability: RecoverabilityCategory
+    recovery_probability: float
+    selected_action: RecoveryAction
+    expected_value: float
+    reason: str
+    decision: RecoveryDecision = RecoveryDecision.RECOVER
+    stop_reason: Optional[StopReason] = None
+    escalate_reason: Optional[EscalateReason] = None
+    candidates: list[ActionCandidate] = Field(default_factory=list)
+    explanation_details: list[str] = Field(default_factory=list)
+    signals: dict[str, Any] = Field(default_factory=dict)
 
 
 class RecoveryCase(BaseModel):
@@ -149,7 +192,10 @@ class RecoveryCase(BaseModel):
     amount_at_risk: float
     reason: str
     status: RecoveryStatus = RecoveryStatus.DETECTED
+    recoverability: Optional[RecoverabilityCategory] = None
     recovery_probability: float = 0.0  # 0.0–1.0 estimate; NOT a monetary amount
+    expected_value: float = 0.0
+    decision_reason: Optional[str] = None
     selected_action: Optional[RecoveryAction] = None
     decision: Optional[RecoveryDecision] = None
     stop_reason: Optional[StopReason] = None
@@ -160,6 +206,7 @@ class RecoveryCase(BaseModel):
     message_count: int = 0
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
+
 
 
 class ActionRecord(BaseModel):

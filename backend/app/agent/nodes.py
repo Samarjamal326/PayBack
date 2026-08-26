@@ -46,12 +46,16 @@ def node_decide(state: RecoveryState) -> dict:
             "decision": result.decision,
             "selected_action": result.action,
             "recovery_probability": result.recovery_probability,
+            "recoverability": result.recoverability,
+            "expected_value": result.expected_value,
+            "decision_reason": result.reason,
             "stop_reason": result.stop_reason,
             "escalate_reason": result.escalate_reason,
             "updated_at": _now(),
         }
     )
     return {"case": case}
+
 
 
 def node_execute_action(state: RecoveryState, executor: ActionExecutor) -> dict:

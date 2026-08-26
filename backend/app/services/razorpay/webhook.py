@@ -78,6 +78,13 @@ def _handle_payment_success(
     transaction_id = notes.get("transaction_id")
     link_id = payment_link_entity.get("id")
 
+    # If notes wasn't present, try extracting transaction_id from description
+    description = payment_link_entity.get("description") or payment_entity.get("description") or ""
+    if not transaction_id and "transaction " in description:
+        parts = description.split("transaction ")
+        if len(parts) > 1:
+            transaction_id = parts[1].strip()
+
     # Amount from paise to INR
     amount_paise = payment_entity.get("amount") or payment_link_entity.get("amount") or 0
     amount_inr = float(amount_paise) / 100.0
@@ -85,6 +92,13 @@ def _handle_payment_success(
     case = None
     if transaction_id:
         case = recovery_service.get_case_by_transaction_id(transaction_id)
+        if not case:
+            # Fallback: maybe description passed case_id directly
+            try:
+                case = recovery_service.get_case(transaction_id)
+            except Exception:
+                case = None
+
 
     if not case:
         return WebhookResult(

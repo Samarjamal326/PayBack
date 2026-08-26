@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     razorpay_key_secret: str = ""
     razorpay_webhook_secret: str = ""
 
+    # LLM Provider: "ollama" | "huggingface" | "mock"
+    llm_provider: str = "ollama"
+
+    # Ollama (Local development default)
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:3b"
+
     # Hugging Face (free/low-cost model only)
     huggingface_api_key: str = ""
     huggingface_model: str = "mistralai/Mistral-7B-Instruct-v0.2"
