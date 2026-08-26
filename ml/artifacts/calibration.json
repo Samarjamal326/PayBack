@@ -1,0 +1,5 @@
+{
+  "method": "sigmoid_on_logit",
+  "coefficient": 0.9540740845599085,
+  "intercept": -0.01725399436142655
+}

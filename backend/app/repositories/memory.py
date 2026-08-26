@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+from datetime import datetime, timezone
 from typing import Optional
 
 from app.models.domain import (
@@ -54,6 +53,44 @@ class InMemoryTransactionRepository(TransactionRepository):
         item = self._store.get(transaction_id)
         return item.model_copy() if item else None
 
+    def count_by_customer_before(
+        self, customer_id: str, before_dt: datetime
+    ) -> int:
+        target_dt = before_dt if before_dt.tzinfo is not None else before_dt.replace(tzinfo=timezone.utc)
+        count = 0
+        for tx in self._store.values():
+            if tx.customer_id == customer_id:
+                tx_dt = tx.created_at if tx.created_at.tzinfo is not None else tx.created_at.replace(tzinfo=timezone.utc)
+                if tx_dt < target_dt:
+                    count += 1
+        return count
+
+    def count_successful_by_customer_before(
+        self, customer_id: str, before_dt: datetime
+    ) -> int:
+        from app.models.domain import TransactionStatus
+        target_dt = before_dt if before_dt.tzinfo is not None else before_dt.replace(tzinfo=timezone.utc)
+        count = 0
+        for tx in self._store.values():
+            if tx.customer_id == customer_id and tx.status == TransactionStatus.SUCCESS:
+                tx_dt = tx.created_at if tx.created_at.tzinfo is not None else tx.created_at.replace(tzinfo=timezone.utc)
+                if tx_dt < target_dt:
+                    count += 1
+        return count
+
+    def count_failed_by_customer_before(
+        self, customer_id: str, before_dt: datetime
+    ) -> int:
+        from app.models.domain import TransactionStatus
+        target_dt = before_dt if before_dt.tzinfo is not None else before_dt.replace(tzinfo=timezone.utc)
+        count = 0
+        for tx in self._store.values():
+            if tx.customer_id == customer_id and tx.status == TransactionStatus.FAILED:
+                tx_dt = tx.created_at if tx.created_at.tzinfo is not None else tx.created_at.replace(tzinfo=timezone.utc)
+                if tx_dt < target_dt:
+                    count += 1
+        return count
+
 
 class InMemoryRecoveryCaseRepository(RecoveryCaseRepository):
     def __init__(self) -> None:
@@ -74,6 +111,20 @@ class InMemoryRecoveryCaseRepository(RecoveryCaseRepository):
         if not cid:
             return None
         return self.get(cid)
+
+    def count_recovered_by_customer_before(
+        self, customer_id: str, before_dt: datetime
+    ) -> int:
+        from app.models.domain import RecoveryOutcome, RecoveryStatus
+        target_dt = before_dt if before_dt.tzinfo is not None else before_dt.replace(tzinfo=timezone.utc)
+        count = 0
+        for case in self._store.values():
+            if case.customer_id == customer_id:
+                if case.outcome == RecoveryOutcome.RECOVERED or case.status == RecoveryStatus.RECOVERED:
+                    case_dt = case.created_at if case.created_at.tzinfo is not None else case.created_at.replace(tzinfo=timezone.utc)
+                    if case_dt < target_dt:
+                        count += 1
+        return count
 
 
 class InMemoryActionRecordRepository(ActionRecordRepository):

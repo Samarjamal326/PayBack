@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Optional
 
 from app.models.domain import (
@@ -36,6 +37,40 @@ class TransactionRepository(ABC):
     def get(self, transaction_id: str) -> Optional[Transaction]:
         ...
 
+    @abstractmethod
+    def count_by_customer_before(
+        self, customer_id: str, before_dt: datetime
+    ) -> int:
+        """
+        Count all transactions for `customer_id` with created_at < before_dt.
+        Used to compute `previous_transactions` for ML feature engineering.
+        Does NOT include the current transaction (caller passes its created_at).
+        """
+        ...
+
+    @abstractmethod
+    def count_successful_by_customer_before(
+        self, customer_id: str, before_dt: datetime
+    ) -> int:
+        """
+        Count transactions with status='success' for `customer_id`
+        with created_at < before_dt.
+        Used to compute `historical_success_rate`.
+        """
+        ...
+
+    @abstractmethod
+    def count_failed_by_customer_before(
+        self, customer_id: str, before_dt: datetime
+    ) -> int:
+        """
+        Count transactions with status='failed' for `customer_id`
+        with created_at < before_dt.
+        Used to compute `previous_failures`.
+        """
+        ...
+
+
 
 class RecoveryCaseRepository(ABC):
     @abstractmethod
@@ -49,6 +84,18 @@ class RecoveryCaseRepository(ABC):
     @abstractmethod
     def get_by_transaction_id(self, transaction_id: str) -> Optional[RecoveryCase]:
         ...
+
+    @abstractmethod
+    def count_recovered_by_customer_before(
+        self, customer_id: str, before_dt: datetime
+    ) -> int:
+        """
+        Count recovery cases for `customer_id` whose outcome is RECOVERED
+        and whose created_at < before_dt.
+        Used to compute `previous_recoveries`.
+        """
+        ...
+
 
 
 class ActionRecordRepository(ABC):

@@ -127,3 +127,71 @@ class TestEscalate:
 
         assert result.decision == RecoveryDecision.STOP
         assert result.stop_reason == StopReason.OPT_OUT
+
+
+class TestMLProbabilityIntegration:
+    """Tests verifying Decision Engine interaction with RecoveryProbabilityModel."""
+
+    class MockProbabilityModel:
+        def __init__(self, probability: float) -> None:
+            self.probability = probability
+            self.called_with_context = None
+
+        def predict(self, context) -> float:
+            self.called_with_context = context
+            return self.probability
+
+    def test_custom_mock_probability_injected(self, failed_transaction, active_customer, default_policy):
+        mock_model = self.MockProbabilityModel(0.92)
+        case = _case(failed_transaction, active_customer)
+        result = evaluate(
+            case,
+            failed_transaction,
+            active_customer,
+            default_policy,
+            probability_model=mock_model,
+        )
+
+        assert result.decision == RecoveryDecision.RECOVER
+        assert result.recovery_probability == 0.92
+        assert mock_model.called_with_context is not None
+        assert mock_model.called_with_context.amount == failed_transaction.amount
+
+    def test_default_model_uses_xgboost_and_returns_valid_probability(
+        self, failed_transaction, active_customer, default_policy
+    ):
+        case = _case(failed_transaction, active_customer)
+        result = evaluate(case, failed_transaction, active_customer, default_policy)
+        assert result.decision == RecoveryDecision.RECOVER
+        assert 0.0 <= result.recovery_probability <= 1.0
+
+    def test_guardrails_override_high_probability(
+        self, failed_transaction, opted_out_customer, default_policy
+    ):
+        mock_model = self.MockProbabilityModel(0.99)
+        case = _case(failed_transaction, opted_out_customer)
+        result = evaluate(
+            case,
+            failed_transaction,
+            opted_out_customer,
+            default_policy,
+            probability_model=mock_model,
+        )
+        assert result.decision == RecoveryDecision.STOP
+        assert result.stop_reason == StopReason.OPT_OUT
+
+    def test_escalation_captures_injected_probability(
+        self, high_value_transaction, active_customer, default_policy
+    ):
+        mock_model = self.MockProbabilityModel(0.88)
+        case = _case(high_value_transaction, active_customer)
+        result = evaluate(
+            case,
+            high_value_transaction,
+            active_customer,
+            default_policy,
+            probability_model=mock_model,
+        )
+        assert result.decision == RecoveryDecision.ESCALATE
+        assert result.recovery_probability == 0.88
+

@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-import json
+from datetime import datetime
 from typing import Any, Optional
 import httpx
 
@@ -104,6 +102,41 @@ class SupabaseTransactionRepository(TransactionRepository):
         rows = self.client.select("transactions", {"id": f"eq.{transaction_id}"})
         return Transaction(**rows[0]) if rows else None
 
+    def count_by_customer_before(
+        self, customer_id: str, before_dt: datetime
+    ) -> int:
+        iso_ts = before_dt.isoformat()
+        rows = self.client.select("transactions", {
+            "customer_id": f"eq.{customer_id}",
+            "created_at": f"lt.{iso_ts}",
+            "select": "id",
+        })
+        return len(rows)
+
+    def count_successful_by_customer_before(
+        self, customer_id: str, before_dt: datetime
+    ) -> int:
+        iso_ts = before_dt.isoformat()
+        rows = self.client.select("transactions", {
+            "customer_id": f"eq.{customer_id}",
+            "status": "eq.success",
+            "created_at": f"lt.{iso_ts}",
+            "select": "id",
+        })
+        return len(rows)
+
+    def count_failed_by_customer_before(
+        self, customer_id: str, before_dt: datetime
+    ) -> int:
+        iso_ts = before_dt.isoformat()
+        rows = self.client.select("transactions", {
+            "customer_id": f"eq.{customer_id}",
+            "status": "eq.failed",
+            "created_at": f"lt.{iso_ts}",
+            "select": "id",
+        })
+        return len(rows)
+
 
 class SupabaseRecoveryCaseRepository(RecoveryCaseRepository):
     def __init__(self, client: SupabaseClient) -> None:
@@ -121,6 +154,19 @@ class SupabaseRecoveryCaseRepository(RecoveryCaseRepository):
     def get_by_transaction_id(self, transaction_id: str) -> Optional[RecoveryCase]:
         rows = self.client.select("recovery_cases", {"transaction_id": f"eq.{transaction_id}"})
         return RecoveryCase(**rows[0]) if rows else None
+
+    def count_recovered_by_customer_before(
+        self, customer_id: str, before_dt: datetime
+    ) -> int:
+        iso_ts = before_dt.isoformat()
+        # PostgREST or filter: outcome=eq.recovered or status=eq.recovered
+        rows = self.client.select("recovery_cases", {
+            "customer_id": f"eq.{customer_id}",
+            "or": "(outcome.eq.recovered,status.eq.recovered)",
+            "created_at": f"lt.{iso_ts}",
+            "select": "id",
+        })
+        return len(rows)
 
 
 class SupabaseActionRecordRepository(ActionRecordRepository):

@@ -1,0 +1,12 @@
+{
+  "model_version": "payback-recovery-v3",
+  "seed": 42,
+  "synthetic_cases": 100000,
+  "train_cases": 70000,
+  "validation_cases": 15000,
+  "test_cases": 15000,
+  "manual_cases": 50,
+  "xgboost_version": "3.0.2",
+  "synthetic_only": true,
+  "production_performance_claim": false
+}

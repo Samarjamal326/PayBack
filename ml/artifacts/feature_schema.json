@@ -1,0 +1,40 @@
+{
+  "version": "payback-recovery-v3",
+  "numeric_features": [
+    "amount",
+    "checkout_intent_score",
+    "customer_tenure_days",
+    "previous_transactions",
+    "historical_success_rate",
+    "previous_failures",
+    "previous_recoveries",
+    "days_since_failure",
+    "retry_count",
+    "messages_sent",
+    "opted_out",
+    "high_value",
+    "prior_recovery_rate",
+    "customer_history_strength"
+  ],
+  "categorical_features": [
+    "payment_method",
+    "failure_type"
+  ],
+  "categories": {
+    "payment_method": [
+      "upi",
+      "card",
+      "netbanking",
+      "wallet"
+    ],
+    "failure_type": [
+      "temporary_bank_error",
+      "timeout",
+      "insufficient_funds",
+      "expired_instrument",
+      "authentication_failure",
+      "unknown"
+    ]
+  },
+  "target": "recovered"
+}
