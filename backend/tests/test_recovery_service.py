@@ -15,11 +15,14 @@ from app.models.domain import (
     Transaction,
     TransactionStatus,
 )
+from app.repositories.factory import create_in_memory_repositories
 from app.services.recovery import RecoveryService
 
 
 def _service() -> RecoveryService:
-    return RecoveryService()
+    repos = create_in_memory_repositories()
+    return RecoveryService(repos=repos)
+
 
 
 class TestRecoveryWorkflow:
@@ -89,8 +92,10 @@ class TestRecoveryWorkflow:
         svc = _service()
         case = svc.ingest_payment_event(failed_transaction, active_customer)
 
-        # Manually mark the case as having exhausted retries
-        svc._cases[case.id] = case.model_copy(update={"retry_count": 3})
+        # Manually mark the case as having exhausted retries in the repository
+        case_exhausted = case.model_copy(update={"retry_count": 3})
+        svc._cases_repo.save(case_exhausted)
 
         final = svc.run_recovery(case.id)
         assert final.status == RecoveryStatus.STOPPED
+

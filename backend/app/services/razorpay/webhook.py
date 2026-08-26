@@ -6,12 +6,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from app.core.idempotency import IdempotencyGuard
 from app.models.domain import (
     AuditEventType,
     AuditRecord,
     RecoveryCase,
     RecoveryOutcome,
     RecoveryStatus,
+    WebhookProcessingStatus,
 )
 from app.services.recovery import RecoveryService
 
@@ -24,6 +26,7 @@ class WebhookResult:
     event: str
     message: str
     case_id: Optional[str] = None
+    is_duplicate: bool = False
 
 
 def verify_webhook_signature(raw_body: bytes, signature: str, secret: str) -> bool:
@@ -45,25 +48,73 @@ def verify_webhook_signature(raw_body: bytes, signature: str, secret: str) -> bo
 def process_razorpay_webhook_event(
     event_data: dict[str, Any],
     recovery_service: RecoveryService,
+    idempotency_guard: Optional[IdempotencyGuard] = None,
 ) -> WebhookResult:
     """
-    Processes an authenticated Razorpay webhook event.
+    Processes an authenticated Razorpay webhook event with idempotency protection.
     """
+    if not isinstance(event_data, dict):
+        return WebhookResult(
+            processed=False,
+            event="unknown",
+            message="Malformed event payload: expected JSON dictionary.",
+        )
+
     event_type = event_data.get("event", "")
     payload = event_data.get("payload", {})
+    provider_event_id = event_data.get("id") or event_data.get("event_id") or ""
 
-    logger.info("Processing Razorpay webhook event: %s", event_type)
+    # Generate fallback event identity from payload entity IDs if not top-level
+    if not provider_event_id:
+        payment_id = payload.get("payment", {}).get("entity", {}).get("id")
+        link_id = payload.get("payment_link", {}).get("entity", {}).get("id")
+        order_id = payload.get("order", {}).get("entity", {}).get("id")
+        entity_key = payment_id or link_id or order_id or ""
+        if entity_key and event_type:
+            provider_event_id = f"{event_type}_{entity_key}"
 
-    if event_type in ("payment_link.paid", "payment.captured", "order.paid"):
-        return _handle_payment_success(event_type, payload, recovery_service)
-    elif event_type in ("payment.failed", "payment_link.expired", "payment_link.cancelled"):
-        return _handle_payment_failure_or_expiry(event_type, payload, recovery_service)
-
-    return WebhookResult(
-        processed=False,
-        event=event_type,
-        message=f"Event '{event_type}' ignored (not a recovery event).",
+    # Webhook Idempotency check
+    guard = idempotency_guard or (
+        IdempotencyGuard(recovery_service._repos.processed_webhooks)
+        if hasattr(recovery_service, "_repos") and recovery_service._repos.processed_webhooks
+        else None
     )
+
+    if guard and provider_event_id:
+        if guard.is_event_processed("razorpay", provider_event_id):
+            logger.info("Duplicate Razorpay webhook event '%s' ignored.", provider_event_id)
+            return WebhookResult(
+                processed=True,
+                event=event_type,
+                message=f"Event '{provider_event_id}' already processed (idempotent duplicate).",
+                is_duplicate=True,
+            )
+
+    logger.info("Processing Razorpay webhook event: %s (id=%s)", event_type, provider_event_id)
+
+    result: WebhookResult
+    if event_type in ("payment_link.paid", "payment.captured", "order.paid"):
+        result = _handle_payment_success(event_type, payload, recovery_service)
+    elif event_type in ("payment.failed", "payment_link.expired", "payment_link.cancelled"):
+        result = _handle_payment_failure_or_expiry(event_type, payload, recovery_service)
+    else:
+        result = WebhookResult(
+            processed=False,
+            event=event_type,
+            message=f"Event '{event_type}' ignored (not a recovery event).",
+        )
+
+    # Record successful processing in idempotency repo
+    if guard and provider_event_id and result.processed:
+        guard.record_processed_event(
+            provider="razorpay",
+            provider_event_id=provider_event_id,
+            event_type=event_type,
+            merchant_id=None,
+            status=WebhookProcessingStatus.PROCESSED,
+        )
+
+    return result
 
 
 def _handle_payment_success(
@@ -98,7 +149,6 @@ def _handle_payment_success(
                 case = recovery_service.get_case(transaction_id)
             except Exception:
                 case = None
-
 
     if not case:
         return WebhookResult(
@@ -153,3 +203,4 @@ def _handle_payment_failure_or_expiry(
         event=event_type,
         message=f"Event '{event_type}' received without active recovery case match.",
     )
+

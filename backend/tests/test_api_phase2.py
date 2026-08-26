@@ -74,11 +74,25 @@ class TestPhase2Endpoints:
             },
         }
 
+        from app.config import settings
+        import hmac, hashlib
+        raw_body = json.dumps(webhook_data).encode("utf-8")
+        headers = {}
+        if settings.razorpay_webhook_secret:
+            sig = hmac.new(
+                key=settings.razorpay_webhook_secret.encode("utf-8"),
+                msg=raw_body,
+                digestmod=hashlib.sha256,
+            ).hexdigest()
+            headers["X-Razorpay-Signature"] = sig
+
         resp = client.post(
             "/api/v1/events/webhook/razorpay",
-            json=webhook_data,
+            content=raw_body,
+            headers={"Content-Type": "application/json", **headers},
         )
         assert resp.status_code == 200
+
         body = resp.json()
         assert body["status"] == "success"
         assert body["case_id"] == case["id"]

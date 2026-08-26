@@ -37,14 +37,19 @@ class SupabaseClient:
         }
 
     def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
-        with httpx.Client(timeout=10.0) as client:
-            resp = client.get(
-                f"{self.url}/rest/v1/{table}",
-                params=params,
-                headers=self._headers,
-            )
-            resp.raise_for_status()
-            return resp.json()
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(
+                    f"{self.url}/rest/v1/{table}",
+                    params=params,
+                    headers=self._headers,
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (400, 404):
+                return []
+            raise
 
     def insert(self, table: str, data: dict[str, Any]) -> dict[str, Any]:
         with httpx.Client(timeout=10.0) as client:
@@ -72,13 +77,16 @@ class SupabaseClient:
 
 
 class SupabaseCustomerRepository(CustomerRepository):
+    DB_COLUMNS = {"id", "external_id", "name", "email", "phone", "opted_out", "created_at"}
+
     def __init__(self, client: SupabaseClient) -> None:
         self.client = client
 
     def save(self, customer: Customer) -> Customer:
         data = customer.model_dump(mode="json")
-        res = self.client.upsert("customers", data)
-        return Customer(**res)
+        db_data = {k: v for k, v in data.items() if k in self.DB_COLUMNS}
+        res = self.client.upsert("customers", db_data)
+        return customer.model_copy(update={k: res[k] for k in res if hasattr(customer, k)})
 
     def get(self, customer_id: str) -> Optional[Customer]:
         rows = self.client.select("customers", {"id": f"eq.{customer_id}"})
@@ -88,19 +96,39 @@ class SupabaseCustomerRepository(CustomerRepository):
         rows = self.client.select("customers", {"external_id": f"eq.{external_id}"})
         return Customer(**rows[0]) if rows else None
 
+    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> list[Customer]:
+        params = {"limit": str(limit), "offset": str(offset), "order": "created_at.desc"}
+        rows = self.client.select("customers", params)
+        return [Customer(**r) for r in rows]
+
 
 class SupabaseTransactionRepository(TransactionRepository):
+    DB_COLUMNS = {
+        "id", "customer_id", "amount", "currency", "payment_method",
+        "status", "failure_reason", "created_at", "updated_at"
+    }
+
     def __init__(self, client: SupabaseClient) -> None:
         self.client = client
 
     def save(self, transaction: Transaction) -> Transaction:
         data = transaction.model_dump(mode="json")
-        res = self.client.upsert("transactions", data)
-        return Transaction(**res)
+        db_data = {k: v for k, v in data.items() if k in self.DB_COLUMNS}
+        res = self.client.upsert("transactions", db_data)
+        return transaction.model_copy(update={k: res[k] for k in res if hasattr(transaction, k)})
 
     def get(self, transaction_id: str) -> Optional[Transaction]:
         rows = self.client.select("transactions", {"id": f"eq.{transaction_id}"})
         return Transaction(**rows[0]) if rows else None
+
+    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> list[Transaction]:
+        params = {"limit": str(limit), "offset": str(offset), "order": "created_at.desc"}
+        rows = self.client.select("transactions", params)
+        return [Transaction(**r) for r in rows]
+
+    def list_by_customer(self, customer_id: str, limit: int = 100) -> list[Transaction]:
+        rows = self.client.select("transactions", {"customer_id": f"eq.{customer_id}", "limit": str(limit), "order": "created_at.desc"})
+        return [Transaction(**r) for r in rows]
 
     def count_by_customer_before(
         self, customer_id: str, before_dt: datetime
@@ -167,6 +195,25 @@ class SupabaseRecoveryCaseRepository(RecoveryCaseRepository):
         rows = self.client.select("recovery_cases", {"transaction_id": f"eq.{transaction_id}"})
         return RecoveryCase(**rows[0]) if rows else None
 
+    def list_by_merchant(
+        self,
+        merchant_id: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RecoveryCase]:
+        params = {"limit": str(limit), "offset": str(offset), "order": "created_at.desc"}
+        if merchant_id:
+            params["merchant_id"] = f"eq.{merchant_id}"
+        if status:
+            params["status"] = f"eq.{status}"
+        rows = self.client.select("recovery_cases", params)
+        return [RecoveryCase(**r) for r in rows]
+
+    def list_by_customer(self, customer_id: str, limit: int = 100) -> list[RecoveryCase]:
+        rows = self.client.select("recovery_cases", {"customer_id": f"eq.{customer_id}", "limit": str(limit), "order": "created_at.desc"})
+        return [RecoveryCase(**r) for r in rows]
+
     def count_recovered_by_customer_before(
         self, customer_id: str, before_dt: datetime
     ) -> int:
@@ -210,15 +257,40 @@ class SupabaseAuditRecordRepository(AuditRecordRepository):
 
 
 class SupabasePolicyRepository(PolicyRepository):
+    DB_COLUMNS = {
+        "maximum_retries", "maximum_messages", "recovery_window_hours",
+        "high_value_threshold", "human_approval_required", "action_costs",
+        "merchant_id"
+    }
+
     def __init__(self, client: SupabaseClient) -> None:
         self.client = client
 
     def save(self, policy: Policy) -> Policy:
         data = policy.model_dump(mode="json")
-        data["merchant_id"] = "default"
-        res = self.client.upsert("policies", data, on_conflict="merchant_id")
-        return Policy(**res)
+        data["merchant_id"] = policy.merchant_id or "default"
+        db_data = {k: v for k, v in data.items() if k in self.DB_COLUMNS}
+        res = self.client.upsert("policies", db_data, on_conflict="merchant_id")
+        return policy.model_copy(update={k: res[k] for k in res if hasattr(policy, k)})
+
+    def get(self, policy_id: str) -> Optional[Policy]:
+        rows = self.client.select("policies", {"merchant_id": "eq.default"})
+        return Policy(**rows[0]) if rows else None
 
     def get_default(self) -> Policy:
         rows = self.client.select("policies", {"merchant_id": "eq.default"})
         return Policy(**rows[0]) if rows else Policy()
+
+    def get_active(self, merchant_id: Optional[str] = None) -> Policy:
+        mid = merchant_id or "default"
+        rows = self.client.select("policies", {"merchant_id": f"eq.{mid}"})
+        if rows:
+            return Policy(**rows[0])
+        return self.get_default()
+
+    def list_by_merchant(self, merchant_id: Optional[str] = None) -> list[Policy]:
+        mid = merchant_id or "default"
+        rows = self.client.select("policies", {"merchant_id": f"eq.{mid}"})
+        return [Policy(**r) for r in rows] if rows else [self.get_default()]
+
+

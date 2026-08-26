@@ -89,7 +89,7 @@ class _ActionHistoryProxy(MutableMapping):
 from app.services.llm.factory import get_message_generator
 
 
-def _default_executor() -> ActionExecutor:
+def _default_executor(repos: Optional[RepositoryBundle] = None) -> ActionExecutor:
     # Use Razorpay Test Mode provider if test keys are configured, otherwise safe stub
     payment_provider = (
         RazorpayPaymentProvider(
@@ -101,13 +101,16 @@ def _default_executor() -> ActionExecutor:
     )
 
     llm_generator = get_message_generator(settings)
+    delivery_repo = repos.message_deliveries if repos else None
 
     return ActionExecutor(
         payment=payment_provider,
         messaging=StubMessagingProvider(),
         escalation=StubEscalationProvider(),
         message_generator=llm_generator,
+        delivery_repo=delivery_repo,
     )
+
 
 
 
@@ -124,9 +127,10 @@ class RecoveryService:
         executor: Optional[ActionExecutor] = None,
         repos: Optional[RepositoryBundle] = None,
     ) -> None:
-        self._executor = executor or _default_executor()
         self._repos = repos or get_repository_bundle()
+        self._executor = executor or _default_executor(self._repos)
         self._graph = build_recovery_graph(self._executor).compile()
+
 
         # Backwards-compatible proxy mappings
         self._cases = _RepoDictProxy(self._repos.cases)

@@ -118,14 +118,88 @@ class AuditEventType(str, Enum):
     RECOVERY_COMPLETED = "RECOVERY_COMPLETED"
     RECOVERY_STOPPED = "RECOVERY_STOPPED"
     RECOVERY_ESCALATED = "RECOVERY_ESCALATED"
+    MESSAGE_GENERATED = "MESSAGE_GENERATED"
+    MESSAGE_SENT = "MESSAGE_SENT"
+    MESSAGE_DELIVERED = "MESSAGE_DELIVERED"
+    MESSAGE_FAILED = "MESSAGE_FAILED"
+    ACTION_FAILED = "ACTION_FAILED"
+    WEBHOOK_RECEIVED = "WEBHOOK_RECEIVED"
+    WEBHOOK_DUPLICATE = "WEBHOOK_DUPLICATE"
+
+
+# Phase 4 enums
+class NotificationType(str, Enum):
+    RECOVERY_COMPLETED = "recovery_completed"
+    RECOVERY_ESCALATED = "recovery_escalated"
+    ACTION_FAILED = "action_failed"
+    PAYMENT_RECOVERED = "payment_recovered"
+    PROVIDER_FAILURE = "provider_failure"
+    WEBHOOK_PROCESSING_ISSUE = "webhook_processing_issue"
+
+
+class MessageChannel(str, Enum):
+    EMAIL = "email"
+    WHATSAPP = "whatsapp"
+    SMS = "sms"
+
+
+class MessageStatus(str, Enum):
+    PENDING = "pending"
+    SENT = "sent"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+
+
+class DeliveryProvider(str, Enum):
+    MOCK = "mock"
+    EMAIL_SMTP = "email_smtp"
+    WHATSAPP_API = "whatsapp_api"
+
+
+class WebhookProcessingStatus(str, Enum):
+    PROCESSED = "processed"
+    DUPLICATE = "duplicate"
+    FAILED = "failed"
+    IGNORED = "ignored"
+
+
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    RETRYING = "retrying"
 
 
 # ---------------------------------------------------------------------------
 # Domain models
 # ---------------------------------------------------------------------------
 
+class Merchant(BaseModel):
+    """Merchant / workspace — the tenant boundary for all PayBack data."""
+    id: str = Field(default_factory=_uuid)
+    name: str
+    email: str
+    phone: Optional[str] = None
+    timezone: str = "Asia/Kolkata"
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class MerchantSettings(BaseModel):
+    """Per-merchant workspace settings and notification preferences."""
+    id: str = Field(default_factory=_uuid)
+    merchant_id: str
+    notify_recovery_completed: bool = True
+    notify_recovery_escalated: bool = True
+    notify_action_failed: bool = True
+    notify_payment_recovered: bool = True
+    updated_at: datetime = Field(default_factory=_now)
+
+
 class Customer(BaseModel):
     id: str = Field(default_factory=_uuid)
+    merchant_id: Optional[str] = None
     external_id: Optional[str] = None
     name: str
     email: Optional[str] = None
@@ -136,6 +210,7 @@ class Customer(BaseModel):
 
 class Transaction(BaseModel):
     id: str = Field(default_factory=_uuid)
+    merchant_id: Optional[str] = None
     customer_id: str
     amount: float
     currency: Currency = Currency.INR
@@ -147,6 +222,10 @@ class Transaction(BaseModel):
 
 
 class Policy(BaseModel):
+    id: str = Field(default_factory=_uuid)
+    merchant_id: Optional[str] = None
+    name: str = "Default Policy"
+    is_active: bool = True
     maximum_retries: int = 3
     maximum_messages: int = 3
     recovery_window_hours: int = 72
@@ -160,6 +239,8 @@ class Policy(BaseModel):
         RecoveryAction.ESCALATE.value: 15.0,
         RecoveryAction.STOP.value: 0.0,
     })
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
 
 
 class ActionCandidate(BaseModel):
@@ -187,6 +268,7 @@ class DecisionRecord(BaseModel):
 
 class RecoveryCase(BaseModel):
     id: str = Field(default_factory=_uuid)
+    merchant_id: Optional[str] = None
     transaction_id: str
     customer_id: str
     amount_at_risk: float
@@ -211,6 +293,7 @@ class RecoveryCase(BaseModel):
 
 class ActionRecord(BaseModel):
     id: str = Field(default_factory=_uuid)
+    merchant_id: Optional[str] = None
     recovery_case_id: str
     action: RecoveryAction
     outcome: Optional[RecoveryOutcome] = None
@@ -221,7 +304,63 @@ class ActionRecord(BaseModel):
 
 class AuditRecord(BaseModel):
     id: str = Field(default_factory=_uuid)
+    merchant_id: Optional[str] = None
     recovery_case_id: str
     event_type: AuditEventType
     detail: str
     created_at: datetime = Field(default_factory=_now)
+
+
+class MessageDeliveryRecord(BaseModel):
+    """Persistent record of each message delivery attempt."""
+    id: str = Field(default_factory=_uuid)
+    merchant_id: Optional[str] = None
+    recovery_case_id: str
+    customer_id: str
+    channel: MessageChannel
+    provider: DeliveryProvider = DeliveryProvider.MOCK
+    provider_message_id: Optional[str] = None
+    status: MessageStatus = MessageStatus.PENDING
+    content_preview: Optional[str] = None
+    sent_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    failure_reason: Optional[str] = None
+    created_at: datetime = Field(default_factory=_now)
+
+
+class Notification(BaseModel):
+    """Merchant-facing notification for recovery lifecycle events."""
+    id: str = Field(default_factory=_uuid)
+    merchant_id: str
+    notification_type: NotificationType
+    title: str
+    message: str
+    recovery_case_id: Optional[str] = None
+    read: bool = False
+    created_at: datetime = Field(default_factory=_now)
+
+
+class ProcessedWebhookEvent(BaseModel):
+    """Idempotency record for webhook event deduplication."""
+    id: str = Field(default_factory=_uuid)
+    merchant_id: Optional[str] = None
+    provider: str = "razorpay"
+    provider_event_id: str
+    event_type: str
+    received_at: datetime = Field(default_factory=_now)
+    processed_at: Optional[datetime] = None
+    processing_status: WebhookProcessingStatus = WebhookProcessingStatus.PROCESSED
+
+
+class BackgroundTask(BaseModel):
+    """Lightweight background task record."""
+    id: str = Field(default_factory=_uuid)
+    name: str
+    status: TaskStatus = TaskStatus.PENDING
+    idempotency_key: Optional[str] = None
+    retry_count: int = 0
+    max_retries: int = 3
+    result: Optional[str] = None
+    error: Optional[str] = None
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)

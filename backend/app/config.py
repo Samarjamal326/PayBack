@@ -37,11 +37,50 @@ class Settings(BaseSettings):
     huggingface_api_key: str = ""
     huggingface_model: str = "mistralai/Mistral-7B-Instruct-v0.2"
 
+    # Authentication & Tenant Security
+    # In test/dev mode without Supabase Auth or JWT secret, defaults gracefully
+    auth_enabled: bool = False
+    jwt_secret_key: str = "payback-dev-secret-key-change-in-production-1234567890"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 1440  # 24 hours
+
+    # Messaging Delivery Providers
+    # 'mock' | 'smtp' | 'whatsapp'
+    message_delivery_provider: str = "mock"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "recovery@payback.ai"
+    whatsapp_api_url: str = ""
+    whatsapp_api_token: str = ""
+    whatsapp_from_phone: str = ""
+
+    # CORS Configuration
+    cors_allowed_origins: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://payback.vercel.app",
+    ]
+
+    # Background Execution
+    # 'in_memory' | 'sync'
+    background_executor_type: str = "in_memory"
+    background_max_workers: int = 4
+
     def is_razorpay_configured(self) -> bool:
         return bool(self.razorpay_key_id and self.razorpay_key_secret)
 
     def is_supabase_configured(self) -> bool:
         return bool(self.supabase_url and (self.supabase_service_role_key or self.supabase_anon_key))
+
+    def is_smtp_configured(self) -> bool:
+        return bool(self.smtp_host and self.smtp_user and self.smtp_password)
+
+    def is_whatsapp_configured(self) -> bool:
+        return bool(self.whatsapp_api_url and self.whatsapp_api_token)
 
     def validate_razorpay_test_mode(self) -> bool:
         """
@@ -72,3 +111,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
