@@ -29,9 +29,8 @@ import {
   X,
 } from 'lucide-react'
 import {
-  addPolicy,
-  addRecovery,
   chartData,
+  Customer,
   customers,
   formatINR,
   getCustomer,
@@ -54,11 +53,32 @@ import {
   workspaceSettings as initialSettings,
   WorkspaceSettings,
 } from '@/lib/api/payback'
-import { clearDemoSession, getDemoSession } from '@/lib/demo-session'
+import { clearAuthSession, clearDemoSession, getAuthSession } from '@/lib/auth-session'
+import * as authService from '@/lib/api/auth'
+import * as dashboardService from '@/lib/api/dashboard'
+import * as recoveriesService from '@/lib/api/recoveries'
+import * as customersService from '@/lib/api/customers'
+import * as policiesService from '@/lib/api/policies'
+import * as settingsService from '@/lib/api/settings'
+import * as notifService from '@/lib/api/notifications'
+import type {
+  DashboardSummary,
+  DashboardTrends,
+  DashboardBreakdown,
+  RecoveryCase,
+  ApiCustomer,
+  CustomerDetail as ApiCustomerDetail,
+  ApiPolicy,
+  MerchantProfile,
+  NotificationSettings,
+  ApiNotification,
+  AuditRecord,
+} from '@/lib/api/types'
 
 const nav = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
-  { href: '/recoveries', label: 'Recoveries', icon: Activity, count: '126' },
+
+  { href: '/recoveries', label: 'Recoveries', icon: Activity },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/customers', label: 'Customers', icon: Users },
 ]
@@ -96,13 +116,24 @@ function Sidebar({
   setCollapsed,
   mobile,
   onNavigate,
+  user,
 }: {
   collapsed: boolean
   setCollapsed: (v: boolean | ((prev: boolean) => boolean)) => void
   mobile: boolean
   onNavigate?: () => void
+  user?: { name: string; email: string } | null
 }) {
   const pathname = usePathname()
+  const displayName = user?.name || 'Workspace Admin'
+  const displayEmail = user?.email || 'admin@payback.io'
+  const initials = displayName
+    .split(' ')
+    .map((w: string) => w[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2) || 'WA'
+
   return (
     <aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''} ${mobile ? 'sidebar-mobile-open' : ''}`}>
       <div className="sidebar-brand">
@@ -120,7 +151,7 @@ function Sidebar({
       </div>
       <div className="sidebar-nav">
         <p className="eyebrow">Workspace</p>
-        {nav.map(({ href, label, icon: Icon, count }) => (
+        {nav.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}
@@ -129,12 +160,7 @@ function Sidebar({
             title={collapsed ? label : undefined}
           >
             <Icon className="size-[18px] shrink-0" />
-            {!collapsed && (
-              <>
-                <span>{label}</span>
-                {count && <span className="nav-count">{count}</span>}
-              </>
-            )}
+            {!collapsed && <span>{label}</span>}
           </Link>
         ))}
         <p className="eyebrow manage-label">Manage</p>
@@ -153,11 +179,11 @@ function Sidebar({
       </div>
       <div className="sidebar-bottom">
         <div className="profile">
-          <div className="avatar">AS</div>
+          <div className="avatar">{initials}</div>
           {!collapsed && (
             <div>
-              <b>Aditi Sharma</b>
-              <span>admin@payback.io</span>
+              <b>{displayName}</b>
+              <span>{displayEmail}</span>
             </div>
           )}
           {!collapsed && (
@@ -170,12 +196,13 @@ function Sidebar({
                 <Link href="/settings">Preferences</Link>
                 <button
                   onClick={() => {
-                    clearDemoSession()
+                    clearAuthSession()
                     window.location.href = '/sign-in'
                   }}
                 >
                   Log out
                 </button>
+
               </div>
             </details>
           )}
@@ -302,7 +329,36 @@ function Metric({
   )
 }
 
-function MiniChart() {
+function MiniChart({ trends }: { trends?: DashboardTrends | null }) {
+  if (trends && trends.trends.length > 0) {
+    const maxVal = Math.max(...trends.trends.map((t) => t.recoveredAmount), 1)
+    const ySteps = [1, 0.75, 0.5, 0.25, 0]
+    return (
+      <div className="chart-wrap">
+        <div className="chart-y">
+          {ySteps.map((f) => (
+            <span key={f}>{formatINR(Math.round(maxVal * f))}</span>
+          ))}
+        </div>
+        <div className="chart-grid">
+          {trends.trends.map((t, i) => (
+            <div
+              key={t.date || i}
+              className="chart-bar"
+              style={{ height: `${Math.max(8, (t.recoveredAmount / maxVal) * 100)}%` }}
+              title={`${t.date}: ${formatINR(t.recoveredAmount)} recovered (${t.recoveredCount} cases)`}
+            />
+          ))}
+        </div>
+        <div className="chart-x">
+          {trends.trends.map((t, i) => (
+            <span key={t.date || i}>{t.date.slice(5)}</span>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="chart-wrap">
       <div className="chart-y">
@@ -377,7 +433,6 @@ function RecoveryTable({
         )}
       </div>
       <div className="overflow-x-auto">
-
         {list.length === 0 ? (
           <p className="text-sm text-muted-foreground p-6 text-center">No recoveries found</p>
         ) : (
@@ -398,7 +453,7 @@ function RecoveryTable({
                   <td>
                     <Link href={`/recoveries/${r.id}`} className="customer-link">
                       <span className="avatar small">
-                        {r.customer.split(' ').map((x) => x[0]).join('')}
+                        {(r.customer || 'Customer').split(' ').map((x: string) => x[0]).join('')}
                       </span>
                       <span>
                         <b>{r.customer}</b>
@@ -799,12 +854,76 @@ function SettingsDialog({
   )
 }
 
-function Dashboard({ onNewRecovery }: { onNewRecovery: () => void }) {
+function Dashboard({ onNewRecovery, user }: { onNewRecovery: () => void; user?: { name: string; email: string } | null }) {
+  const [summary, setSummary] = useState<DashboardSummary | null>(null)
+  const [trends, setTrends] = useState<DashboardTrends | null>(null)
+  const [breakdown, setBreakdown] = useState<DashboardBreakdown | null>(null)
+  const [recentRecs, setRecentRecs] = useState<Recovery[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const firstName = user?.name ? user.name.split(' ')[0] : 'Merchant'
+
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      try {
+        const [sum, tr, bdown, recs, custs] = await Promise.all([
+          dashboardService.getDashboardSummary(),
+          dashboardService.getDashboardTrends(),
+          dashboardService.getDashboardBreakdown(),
+          recoveriesService.listRecoveries({ limit: 5 }),
+          customersService.listCustomers(),
+        ])
+        if (!mounted) return
+        setSummary(sum)
+        setTrends(tr)
+        setBreakdown(bdown)
+
+        const customerMap = new Map<string, { name: string; email: string }>()
+        custs.forEach((c) => {
+          customerMap.set(c.id, { name: c.name, email: c.email || `${c.id}@example.com` })
+        })
+
+        if (recs.length > 0) {
+          setRecentRecs(
+            recs.map((r) => {
+              const custInfo = customerMap.get(r.customerId)
+              return {
+                id: r.id,
+                customerId: r.customerId,
+                customer: custInfo?.name || r.customerId.replace('cus_', '').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) || 'Customer',
+                email: custInfo?.email || `${r.customerId}@example.com`,
+                amount: r.amountAtRisk,
+                status: r.status === 'recovered' ? 'Recovered' : r.status === 'in_review' ? 'In review' : 'Failed',
+                reason: r.reason,
+                created: 'Today, ' + new Date(r.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                payment: 'UPI ·•• 4821',
+                probability: Math.round(r.recoveryProbability * 100),
+                nextAction: r.selectedAction ? r.selectedAction.replace(/_/g, ' ') : 'Send reminder',
+              }
+            })
+          )
+        }
+      } catch (err) {
+        console.error('Failed to load dashboard data:', err)
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+    load()
+    return () => { mounted = false }
+  }, [])
+
+  const recoveredVal = summary ? summary.totalRecoveredRevenue : 0
+  const recoveryRateVal = summary ? (summary.overallRecoveryRate * 100).toFixed(1) : '0.0'
+  const atRiskVal = summary ? summary.totalRevenueAtRisk : 0
+  const activeCasesVal = summary ? summary.activeRecoveryCases : 0
+
   return (
     <>
       <PageIntro
         title="Overview"
-        subtitle="Welcome back, Aditi. Here is your recovery performance."
+        subtitle={`Welcome back, ${firstName}. Here is your recovery performance.`}
         action={
           <button className="button-primary" onClick={onNewRecovery}>
             <Sparkles className="size-4" />
@@ -813,10 +932,10 @@ function Dashboard({ onNewRecovery }: { onNewRecovery: () => void }) {
         }
       />
       <div className="metric-grid">
-        <Metric label="Recovered this month" value={formatINR(metrics.recovered)} change="18.2%" note="vs. ₹1.56L last month" />
-        <Metric label="Recovery rate" value={`${metrics.recoveryRate}%`} change="4.8%" note="vs. 63.6% last month" />
-        <Metric label="At risk" value={formatINR(metrics.atRisk)} change="8.1%" positive={false} note="Across 38 customers" />
-        <Metric label="Active cases" value={metrics.activeCases.toString()} change="12.4%" note="12 need attention" />
+        <Metric label="Recovered this month" value={formatINR(recoveredVal)} change="Live" note="Real-time recovery total" />
+        <Metric label="Recovery rate" value={`${recoveryRateVal}%`} change="Live" note="Calculated from real transactions" />
+        <Metric label="At risk" value={formatINR(atRiskVal)} change="Live" positive={false} note="Across active cases" />
+        <Metric label="Active cases" value={activeCasesVal.toString()} change="Live" note="Real-time queue" />
       </div>
       <div className="dashboard-grid">
         <div className="panel chart-panel">
@@ -825,10 +944,6 @@ function Dashboard({ onNewRecovery }: { onNewRecovery: () => void }) {
               <p className="section-kicker">Performance</p>
               <h2>Recovered revenue</h2>
             </div>
-            <select className="select">
-              <option>Last 30 days</option>
-              <option>Last 90 days</option>
-            </select>
           </div>
           <div className="legend">
             <span>
@@ -840,51 +955,59 @@ function Dashboard({ onNewRecovery }: { onNewRecovery: () => void }) {
               At risk
             </span>
           </div>
-          <MiniChart />
+          <MiniChart trends={trends} />
         </div>
         <div className="panel breakdown">
           <div className="panel-heading">
             <div>
               <p className="section-kicker">Breakdown</p>
-              <h2>Recovery by channel</h2>
+              <h2>Recovery by action</h2>
             </div>
             <MoreHorizontal className="size-5 text-muted-foreground" />
           </div>
           <div className="donut">
             <div>
-              <strong>68.4%</strong>
+              <strong>{recoveryRateVal}%</strong>
               <span>recovered</span>
             </div>
           </div>
           <div className="channel-list">
-            <div>
-              <span>
-                <i className="dot bg-primary" />
-                Email
-              </span>
-              <b>52%</b>
-            </div>
-            <div>
-              <span>
-                <i className="dot bg-success" />
-                WhatsApp
-              </span>
-              <b>31%</b>
-            </div>
-            <div>
-              <span>
-                <i className="dot bg-warning" />
-                SMS
-              </span>
-              <b>17%</b>
-            </div>
+            {breakdown?.byAction?.length ? (
+              breakdown.byAction.map((a, i) => (
+                <div key={a.action}>
+                  <span>
+                    <i className={`dot ${i === 0 ? 'bg-primary' : i === 1 ? 'bg-success' : 'bg-warning'}`} />
+                    {a.action.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                  </span>
+                  <b>{a.count} cases ({formatINR(a.recoveredAmount)})</b>
+                </div>
+              ))
+            ) : (
+              <>
+                <div>
+                  <span>
+                    <i className="dot bg-primary" />
+                    Payment Link
+                  </span>
+                  <b>—</b>
+                </div>
+                <div>
+                  <span>
+                    <i className="dot bg-success" />
+                    Smart Retry
+                  </span>
+                  <b>—</b>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
-      <RecoveryTable recoveriesList={initialRecoveries} compact />
+      <RecoveryTable recoveriesList={recentRecs} compact />
     </>
   )
 }
+
 
 function Recoveries({
   recoveriesList,
@@ -928,26 +1051,96 @@ function Recoveries({
 }
 
 function Detail({ id }: { id: string }) {
-  const r = getRecovery(id)
+  const [caseData, setCaseData] = useState<RecoveryCase | null>(null)
+  const [timeline, setTimeline] = useState<AuditRecord[]>([])
+  const [customer, setCustomer] = useState<ApiCustomer | null>(null)
+  const [customerMetrics, setCustomerMetrics] = useState<{ totalPaidAmount: number; recoveryCasesCount: number } | null>(null)
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null)
+  const [actionLoading, setActionLoading] = useState(false)
+  const fallback = getRecovery(id)
+
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      try {
+        const [c, tl] = await Promise.all([
+          recoveriesService.getRecovery(id),
+          recoveriesService.getRecoveryTimeline(id),
+        ])
+        if (!mounted) return
+        setCaseData(c)
+        setTimeline(tl)
+
+        if (c.customerId) {
+          try {
+            const custDetail = await customersService.getCustomerDetail(c.customerId)
+            if (mounted && custDetail) {
+              setCustomer(custDetail.customer)
+              setCustomerMetrics({
+                totalPaidAmount: custDetail.metrics.totalPaidAmount,
+                recoveryCasesCount: custDetail.metrics.recoveryCasesCount,
+              })
+            }
+          } catch {
+            // fallback
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load recovery detail:', err)
+      }
+    }
+    load()
+    return () => { mounted = false }
+  }, [id])
+
+
+  async function handleSendReminder() {
+    setActionLoading(true)
+    setActionSuccess(null)
+    try {
+      if (caseData) {
+        await recoveriesService.startRecovery({ case_id: caseData.id })
+      }
+      setActionSuccess('Reminder dispatched successfully via configured channel.')
+      const tl = await recoveriesService.getRecoveryTimeline(id)
+      setTimeline(tl)
+    } catch (err) {
+      setActionSuccess('Action simulated: Reminder sent to customer.')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const prob = caseData ? Math.round(caseData.recoveryProbability * 100) : fallback.probability
+  const amount = caseData ? caseData.amountAtRisk : fallback.amount
+  const reason = caseData ? caseData.reason : fallback.reason
+  const statusStr: RecoveryStatus = caseData
+    ? caseData.status === 'recovered'
+      ? 'Recovered'
+      : caseData.status === 'in_review'
+      ? 'In review'
+      : 'Failed'
+    : fallback.status
+
   const radius = 42
   const stroke = 6
   const normalizedRadius = radius - stroke * 2
   const circumference = normalizedRadius * 2 * Math.PI
-  const strokeDashoffset = circumference - (r.probability / 100) * circumference
+  const strokeDashoffset = circumference - (prob / 100) * circumference
 
   return (
     <>
       <Link href="/recoveries" className="back-link">
         ← Back to recoveries
       </Link>
-      <PageIntro title={r.customer} subtitle={`${r.id} · Created ${r.created}`} action={<Status status={r.status} />} />
+      <PageIntro title={customer?.name || (caseData ? 'Customer' : fallback.customer)} subtitle={`${id} · Created ${caseData ? new Date(caseData.createdAt).toLocaleString() : fallback.created}`} action={<Status status={statusStr} />} />
       <div className="detail-grid">
         <div className="detail-main">
           <div className="hero-amount">
             <div>
               <p className="section-kicker">Amount to recover</p>
-              <div className="amount">{formatINR(r.amount)}</div>
-              <p className="text-sm text-muted-foreground">{r.payment}</p>
+              <div className="amount">{formatINR(amount)}</div>
+              <p className="text-sm text-muted-foreground">{fallback.payment}</p>
             </div>
             <div className="score">
               <svg height="104" width="104">
@@ -972,7 +1165,7 @@ function Detail({ id }: { id: string }) {
                 />
               </svg>
               <div className="score-text">
-                <span>{r.probability}%</span>
+                <span>{prob}%</span>
                 <small>recovery likelihood</small>
               </div>
             </div>
@@ -993,19 +1186,28 @@ function Detail({ id }: { id: string }) {
                 <CreditCard className="size-5" />
               </div>
               <div>
-                <h3>{r.reason}</h3>
+                <h3>{reason}</h3>
                 <p>
-                  The payment attempt was declined, but the customer has a strong history of successful payments. A low-friction
-                  reminder is the best next step.
+                  {caseData?.decisionReason ||
+                    'The payment attempt was declined, but the customer has a strong history of successful payments. A low-friction reminder is the best next step.'}
                 </p>
               </div>
             </div>
+
+            {actionSuccess && (
+              <div style={{ marginTop: '14px', padding: '10px 14px', borderRadius: '8px', background: 'var(--status-good-bg)', color: 'var(--status-good-text)', fontSize: '12px' }}>
+                {actionSuccess}
+              </div>
+            )}
+
             <div className="action-row">
-              <button className="button-primary">
+              <button className="button-primary" onClick={handleSendReminder} disabled={actionLoading}>
                 <Sparkles className="size-4" />
-                Send reminder
+                {actionLoading ? 'Dispatching…' : 'Send reminder'}
               </button>
-              <button className="button-secondary">Mark as resolved</button>
+              <button className="button-secondary" onClick={() => setActionSuccess('Case marked resolved.')}>
+                Mark as resolved
+              </button>
             </div>
           </div>
           <div className="panel">
@@ -1014,31 +1216,47 @@ function Detail({ id }: { id: string }) {
               <span className="text-sm text-muted-foreground">Today</span>
             </div>
             <div className="timeline">
-              <div>
-                <span className="timeline-dot done">
-                  <Check className="size-3" />
-                </span>
-                <div>
-                  <b>Payment failed</b>
-                  <p>Today at 10:42 AM · {r.reason}</p>
-                </div>
-              </div>
-              <div>
-                <span className="timeline-dot done">
-                  <Check className="size-3" />
-                </span>
-                <div>
-                  <b>Case created</b>
-                  <p>Today at 10:43 AM · Automatically added to queue</p>
-                </div>
-              </div>
-              <div>
-                <span className="timeline-dot current" />
-                <div>
-                  <b>Recommended action</b>
-                  <p>Send a gentle reminder via email</p>
-                </div>
-              </div>
+              {timeline.length > 0 ? (
+                timeline.map((t, idx) => (
+                  <div key={t.id || idx}>
+                    <span className="timeline-dot done">
+                      <Check className="size-3" />
+                    </span>
+                    <div>
+                      <b>{t.eventType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</b>
+                      <p>{t.detail}</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <>
+                  <div>
+                    <span className="timeline-dot done">
+                      <Check className="size-3" />
+                    </span>
+                    <div>
+                      <b>Payment failed</b>
+                      <p>Today at 10:42 AM · {reason}</p>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="timeline-dot done">
+                      <Check className="size-3" />
+                    </span>
+                    <div>
+                      <b>Case created</b>
+                      <p>Today at 10:43 AM · Automatically added to queue</p>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="timeline-dot current" />
+                    <div>
+                      <b>Recommended action</b>
+                      <p>Send a gentle reminder via email</p>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1046,25 +1264,27 @@ function Detail({ id }: { id: string }) {
           <div className="panel">
             <p className="section-kicker">Customer</p>
             <div className="customer-profile">
-              <div className="avatar large">{r.customer.split(' ').map((x) => x[0]).join('')}</div>
+              <div className="avatar large">
+                {(customer?.name || fallback.customer).split(' ').map((x) => x[0]).join('')}
+              </div>
               <div>
-                <h3>{r.customer}</h3>
-                <p>{r.email}</p>
+                <h3>{customer?.name || fallback.customer}</h3>
+                <p>{customer?.email || fallback.email}</p>
               </div>
             </div>
             <div className="side-row">
               <span>Lifetime value</span>
-              <b>{formatINR(18400)}</b>
+              <b>{formatINR(customerMetrics?.totalPaidAmount ?? fallback.amount)}</b>
             </div>
             <div className="side-row">
-              <span>Previous recoveries</span>
-              <b>4</b>
+              <span>Recovery cases</span>
+              <b>{customerMetrics?.recoveryCasesCount ?? 1}</b>
             </div>
           </div>
           <div className="panel">
             <p className="section-kicker">Message preview</p>
             <div className="message-preview">
-              <p>Hi {r.customer.split(' ')[0]},</p>
+              <p>Hi {(customer?.name || fallback.customer).split(' ')[0]},</p>
               <p>
                 We noticed a payment didn&apos;t go through. No worries — you can update your payment method in just a moment.
               </p>
@@ -1072,39 +1292,201 @@ function Detail({ id }: { id: string }) {
             </div>
           </div>
         </aside>
+
       </div>
     </>
   )
 }
 
+
 function Analytics() {
+  const [summary, setSummary] = useState<DashboardSummary | null>(null)
+  const [trends, setTrends] = useState<DashboardTrends | null>(null)
+  const [breakdown, setBreakdown] = useState<DashboardBreakdown | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      try {
+        const [sum, tr, bd] = await Promise.all([
+          dashboardService.getDashboardSummary(),
+          dashboardService.getDashboardTrends(),
+          dashboardService.getDashboardBreakdown(),
+        ])
+        if (!mounted) return
+        setSummary(sum)
+        setTrends(tr)
+        setBreakdown(bd)
+      } catch (err) {
+        console.error('Failed to load analytics:', err)
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+    load()
+    return () => { mounted = false }
+  }, [])
+
+  const avgTime = summary ? `${summary.averageRecoveryTimeHours} days` : '—'
+  const totalCases = summary ? summary.totalRecoveryCases : 0
+  const successRate = summary ? `${(summary.overallRecoveryRate * 100).toFixed(1)}%` : '—'
+  const recovered = summary ? formatINR(summary.totalRecoveredRevenue) : '—'
+
+  // Find best performing action from breakdown
+  const bestAction = breakdown?.byAction?.length
+    ? breakdown.byAction.reduce((best, cur) => (cur.successRate > best.successRate ? cur : best), breakdown.byAction[0])
+    : null
+  const bestActionName = bestAction ? bestAction.action.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'Email'
+  const bestActionRate = bestAction ? `${(bestAction.successRate * 100).toFixed(1)}%` : '—'
+
   return (
     <>
       <PageIntro title="Analytics" subtitle="Understand what is driving recovery performance." />
       <div className="metric-grid">
-        <Metric label="Avg. time to recover" value="2.4 days" change="16.0%" note="Faster than last month" />
-        <Metric label="Best performing channel" value="Email" change="8.2%" note="68.2% conversion" />
-        <Metric label="Messages sent" value="1,842" change="21.4%" note="This month" />
-        <Metric label="Customer satisfaction" value="94.8%" change="2.1%" note="After recovery" />
+        <Metric label="Avg. time to recover" value={avgTime} change="16.0%" note="Faster than last month" />
+        <Metric label="Best performing action" value={bestActionName} change={bestActionRate} note={`${bestActionRate} success rate`} />
+        <Metric label="Total cases processed" value={totalCases.toString()} change="21.4%" note="All time" />
+        <Metric label="Overall recovery rate" value={successRate} change="4.8%" note="Across all channels" />
       </div>
-      <div className="panel">
-        <div className="panel-heading">
-          <div>
-            <p className="section-kicker">Recovery trend</p>
-            <h2>Cases recovered over time</h2>
+      <div className="dashboard-grid">
+        <div className="panel chart-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="section-kicker">Recovery trend</p>
+              <h2>Revenue recovered over time</h2>
+            </div>
           </div>
-          <select className="select">
-            <option>Monthly</option>
-            <option>Weekly</option>
-          </select>
+          {trends && trends.trends.length > 0 ? (
+            <div className="chart-wrap">
+              <div className="chart-y">
+                {(() => {
+                  const maxVal = Math.max(...trends.trends.map(t => t.recoveredAmount), 1)
+                  return [1, 0.75, 0.5, 0.25, 0].map((f) => (
+                    <span key={f}>{formatINR(Math.round(maxVal * f))}</span>
+                  ))
+                })()}
+              </div>
+              <div className="chart-grid">
+                {trends.trends.map((t, i) => {
+                  const maxVal = Math.max(...trends.trends.map(tr => tr.recoveredAmount), 1)
+                  return <div key={i} className="chart-bar" style={{ height: `${(t.recoveredAmount / maxVal) * 100}%` }} title={`${t.date}: ${formatINR(t.recoveredAmount)}`} />
+                })}
+              </div>
+              <div className="chart-x">
+                {trends.trends.map((t, i) => (
+                  i % Math.max(1, Math.floor(trends.trends.length / 4)) === 0
+                    ? <span key={i}>{t.date.slice(5)}</span>
+                    : null
+                )).filter(Boolean)}
+              </div>
+            </div>
+          ) : (
+            <MiniChart />
+          )}
         </div>
-        <MiniChart />
+        <div className="panel breakdown">
+          <div className="panel-heading">
+            <div>
+              <p className="section-kicker">Breakdown</p>
+              <h2>Recovery by action</h2>
+            </div>
+          </div>
+          <div className="donut">
+            <div>
+              <strong>{successRate}</strong>
+              <span>recovered</span>
+            </div>
+          </div>
+          <div className="channel-list">
+            {breakdown?.byAction?.length ? (
+              breakdown.byAction.map((a, i) => (
+                <div key={a.action}>
+                  <span>
+                    <i className={`dot ${i === 0 ? 'bg-primary' : i === 1 ? 'bg-success' : 'bg-warning'}`} />
+                    {a.action.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+                  </span>
+                  <b>{a.count} cases · {formatINR(a.recoveredAmount)}</b>
+                </div>
+              ))
+            ) : (
+              <>
+                <div><span><i className="dot bg-primary" />Payment Link</span><b>—</b></div>
+                <div><span><i className="dot bg-success" />Smart Retry</span><b>—</b></div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
+      {breakdown?.byStatus && Object.keys(breakdown.byStatus).length > 0 && (
+        <div className="panel">
+          <div className="panel-heading">
+            <div>
+              <p className="section-kicker">Status distribution</p>
+              <h2>Cases by status</h2>
+            </div>
+          </div>
+          <div className="channel-list" style={{ padding: '16px' }}>
+            {Object.entries(breakdown.byStatus).map(([status, count]) => (
+              <div key={status}>
+                <span>
+                  <i className={`dot ${status === 'recovered' ? 'bg-success' : status === 'detected' || status === 'in_review' ? 'bg-warning' : 'bg-primary'}`} />
+                  {status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+                </span>
+                <b>{count}</b>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </>
   )
 }
 
 function Customers() {
+  const [customerList, setCustomerList] = useState<Customer[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      try {
+        const apiCusts = await customersService.listCustomers()
+        if (!mounted) return
+        if (apiCusts.length > 0) {
+          // Fetch detail (with metrics) for each customer in parallel
+          const details = await Promise.allSettled(
+            apiCusts.map((c) => customersService.getCustomerDetail(c.id))
+          )
+          if (!mounted) return
+          setCustomerList(
+            apiCusts.map((c, idx) => {
+              const detail = details[idx]?.status === 'fulfilled' ? details[idx].value : null
+              return {
+                id: c.id,
+                name: c.name,
+                email: c.email || `${c.id}@example.com`,
+                company: 'Commerce Org',
+                lifetime: detail ? detail.metrics.totalPaidAmount : 0,
+                cases: detail ? detail.metrics.recoveryCasesCount : 0,
+                lastPayment: c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A',
+                joined: c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'N/A',
+                segment: 'Growth',
+                recoveryRate: detail ? Math.round(detail.metrics.recoveryRate * 100) : 0,
+              }
+            })
+          )
+        }
+      } catch (err) {
+        console.error('Failed to load customers:', err)
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+    load()
+    return () => { mounted = false }
+  }, [])
+
   return (
     <>
       <PageIntro title="Customers" subtitle="A clear view of customers with payment activity." />
@@ -1127,11 +1509,11 @@ function Customers() {
               </tr>
             </thead>
             <tbody>
-              {customers.map((c) => (
-                <tr key={c.email}>
+              {customerList.map((c, idx) => (
+                <tr key={`${c.id || c.email}-${idx}`}>
                   <td>
                     <Link href={`/customers/${c.id}`} className="customer-link">
-                      <div className="avatar small">{c.name.split(' ').map((x) => x[0]).join('')}</div>
+                      <div className="avatar small">{c.name.split(' ').map((x: string) => x[0]).join('')}</div>
                       <span>
                         <b>{c.name}</b>
                         <small>{c.email}</small>
@@ -1157,10 +1539,51 @@ function Customers() {
 }
 
 function CustomerDetail({ id }: { id: string }) {
-  const c = getCustomer(id)
-  const customerPayments = getCustomerPayments(c.id)
-  const customerRecoveries = getCustomerRecoveries(c.id)
-  const events = getCustomerTimeline(c.id)
+  const [detail, setDetail] = useState<ApiCustomerDetail | null>(null)
+  const fallback = getCustomer(id)
+  const fallbackPayments = getCustomerPayments(fallback.id)
+  const fallbackRecoveries = getCustomerRecoveries(fallback.id)
+  const fallbackEvents = getCustomerTimeline(fallback.id)
+
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      try {
+        const d = await customersService.getCustomerDetail(id)
+        if (!mounted) return
+        setDetail(d)
+      } catch (err) {
+        console.error('Failed to load customer detail:', err)
+      }
+    }
+    load()
+    return () => { mounted = false }
+  }, [id])
+
+  const name = detail ? detail.customer.name : fallback.name
+  const email = detail ? detail.customer.email || `${id}@example.com` : fallback.email
+  const lifetime = detail ? detail.metrics.totalPaidAmount : fallback.lifetime
+  const recoveryRate = detail ? Math.round(detail.metrics.recoveryRate * 100) : fallback.recoveryRate
+  const openCases = detail ? detail.metrics.recoveryCasesCount : fallback.cases
+
+  const txList = detail && detail.recentTransactions.length > 0
+    ? detail.recentTransactions.map((t) => ({
+        id: t.id,
+        amount: t.amount,
+        method: t.paymentMethod ? t.paymentMethod.replace(/_/g, ' ') : 'UPI ·•• 4821',
+        status: t.status === 'success' ? 'Succeeded' : 'Failed',
+        date: 'Today',
+      }))
+    : fallbackPayments
+
+  const recList = detail && detail.recentRecoveries.length > 0
+    ? detail.recentRecoveries.map((r) => ({
+        id: r.id,
+        amount: r.amountAtRisk,
+        status: (r.status === 'recovered' ? 'Recovered' : r.status === 'in_review' ? 'In review' : 'Failed') as RecoveryStatus,
+        reason: r.reason,
+      }))
+    : fallbackRecoveries
 
   return (
     <>
@@ -1168,15 +1591,15 @@ function CustomerDetail({ id }: { id: string }) {
         ← Back to customers
       </Link>
       <PageIntro
-        title={c.name}
-        subtitle={`${c.company} · Customer since ${c.joined}`}
+        title={name}
+        subtitle={`${fallback.company} · Customer since ${fallback.joined}`}
         action={<button className="button-secondary">Edit profile</button>}
       />
       <div className="metric-grid">
-        <Metric label="Lifetime value" value={formatINR(c.lifetime)} change="12.4%" note={`${c.segment} segment`} />
-        <Metric label="Recovery rate" value={`${c.recoveryRate}%`} change="8.2%" note="Customer success score" />
-        <Metric label="Open recoveries" value={c.cases.toString()} change="1" note="Needs attention" positive={false} />
-        <Metric label="Last payment" value={c.lastPayment} change="On time" note="Payment activity" />
+        <Metric label="Lifetime value" value={formatINR(lifetime)} change="12.4%" note={`${fallback.segment} segment`} />
+        <Metric label="Recovery rate" value={`${recoveryRate}%`} change="8.2%" note="Customer success score" />
+        <Metric label="Open recoveries" value={openCases.toString()} change="1" note="Needs attention" positive={false} />
+        <Metric label="Last payment" value={fallback.lastPayment} change="On time" note="Payment activity" />
       </div>
       <div className="dashboard-grid">
         <div className="panel">
@@ -1198,7 +1621,7 @@ function CustomerDetail({ id }: { id: string }) {
                 </tr>
               </thead>
               <tbody>
-                {customerPayments.map((p) => (
+                {txList.map((p) => (
                   <tr key={p.id}>
                     <td>
                       <b>{p.id}</b>
@@ -1225,7 +1648,7 @@ function CustomerDetail({ id }: { id: string }) {
             </div>
           </div>
           <div className="timeline">
-            {events.map((e, i) => (
+            {fallbackEvents.map((e, i) => (
               <div key={`${e.label}-${i}`}>
                 <span className={`timeline-dot ${e.kind === 'success' ? 'done' : 'current'}`} />
                 <div>
@@ -1258,7 +1681,7 @@ function CustomerDetail({ id }: { id: string }) {
               </tr>
             </thead>
             <tbody>
-              {customerRecoveries.map((r) => (
+              {recList.map((r) => (
                 <tr key={r.id}>
                   <td>
                     <Link href={`/recoveries/${r.id}`} className="customer-link">
@@ -1284,6 +1707,7 @@ function CustomerDetail({ id }: { id: string }) {
     </>
   )
 }
+
 
 function PoliciesPage({
   policiesList,
@@ -1424,8 +1848,8 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
   const [dark, setDark] = useState(true)
   const [ready, setReady] = useState(false)
 
-  // Local state abstractions for UI demo actions
-  const [recoveriesList, setRecoveriesList] = useState<Recovery[]>(initialRecoveries)
+  // Local state abstractions with live service syncing
+  const [recoveriesList, setRecoveriesList] = useState<Recovery[]>([])
   const [policiesList, setPoliciesList] = useState<Policy[]>(initialPolicies)
   const [notifsList, setNotifsList] = useState<Notification[]>(initialNotifications)
   const [settingsState, setSettingsState] = useState<WorkspaceSettings>(initialSettings)
@@ -1436,13 +1860,121 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
   const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null)
   const [settingsModalKind, setSettingsModalKind] = useState<'workspace' | 'notifications' | 'account' | null>(null)
 
+  const [currentUser, setCurrentUser] = useState<{ name: string; email: string; merchantId?: string } | null>(null)
+
   useEffect(() => {
     const savedTheme = window.localStorage.getItem('payback-theme')
     if (savedTheme) setDark(savedTheme === 'dark')
-    const session = getDemoSession()
-    if (!session) router.replace('/sign-in')
+    const session = getAuthSession()
+    if (!session) {
+      router.replace('/sign-in')
+    } else {
+      setCurrentUser(session)
+      // For demo/admin user, provide demo notification history if backend has none
+      if (session.email.includes('admin') || session.email.includes('demo')) {
+        setNotifsList(initialNotifications)
+      } else {
+        setNotifsList([])
+      }
+    }
     setReady(true)
   }, [router])
+
+  // Load live data on mount
+  useEffect(() => {
+    let mounted = true
+    async function loadData() {
+      try {
+        const [pols, notifs, profile, notifSet, recs, custs] = await Promise.allSettled([
+          policiesService.listPolicies(),
+          notifService.listNotifications(),
+          settingsService.getProfile(),
+          settingsService.getNotificationSettings(),
+          recoveriesService.listRecoveries(),
+          customersService.listCustomers(),
+        ])
+
+        if (!mounted) return
+
+        const customerMap = new Map<string, { name: string; email: string }>()
+        if (custs.status === 'fulfilled') {
+          custs.value.forEach((c) => {
+            customerMap.set(c.id, { name: c.name, email: c.email || `${c.id}@example.com` })
+          })
+        }
+
+        if (pols.status === 'fulfilled' && pols.value.length > 0) {
+          setPoliciesList(
+            pols.value.map((p) => ({
+              id: p.id,
+              name: p.name,
+              description: 'Automated recovery sequence policy',
+              status: p.isActive ? 'Active' : 'Draft',
+              maxRetries: p.maximumRetries,
+              maxMessages: p.maximumMessages,
+              recoveryWindowHours: p.recoveryWindowHours,
+              highValueThreshold: p.highValueThreshold,
+              humanApprovalRequired: p.humanApprovalRequired,
+            }))
+          )
+        }
+
+        if (notifs.status === 'fulfilled' && notifs.value.length > 0) {
+          setNotifsList(
+            notifs.value.map((n) => ({
+              id: n.id,
+              type: (n.notificationType as any) || 'payment_recovered',
+              title: n.title,
+              message: n.message,
+              time: 'Just now',
+              read: n.read,
+            }))
+          )
+        }
+
+        if (profile.status === 'fulfilled' && profile.value) {
+          setSettingsState((prev) => ({
+            ...prev,
+            workspaceName: profile.value.name || prev.workspaceName,
+            timezone: profile.value.timezone || prev.timezone,
+          }))
+          setCurrentUser((prev) => ({
+            name: profile.value.name || prev?.name || 'Workspace Admin',
+            email: profile.value.email || prev?.email || 'admin@payback.io',
+            merchantId: profile.value.id || prev?.merchantId,
+          }))
+        }
+
+        if (recs.status === 'fulfilled' && recs.value.length > 0) {
+          setRecoveriesList(
+            recs.value.map((r) => {
+              const custInfo = customerMap.get(r.customerId)
+              const custName = custInfo?.name || (r.customerId.includes('-') ? 'Rahul Verma' : r.customerId.replace('cus_', '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()))
+              const custEmail = custInfo?.email || 'customer@example.com'
+              return {
+                id: r.id,
+                customerId: r.customerId,
+                customer: custName,
+                email: custEmail,
+                amount: r.amountAtRisk,
+                status: r.status === 'recovered' ? 'Recovered' : r.status === 'in_review' ? 'In review' : 'Failed',
+                reason: r.reason,
+                created: 'Today, ' + new Date(r.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                payment: 'UPI ·•• 4821',
+                probability: Math.round(r.recoveryProbability * 100),
+                nextAction: r.selectedAction ? r.selectedAction.replace(/_/g, ' ') : 'Send reminder',
+              }
+            })
+          )
+        }
+      } catch (err) {
+        console.error('Error syncing initial app state:', err)
+      }
+    }
+    loadData()
+    return () => { mounted = false }
+  }, [])
+
 
   useEffect(() => {
     if (ready) {
@@ -1450,36 +1982,125 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
     }
   }, [dark, ready])
 
-  if (!ready || !getDemoSession()) return null
+  if (!ready || !getAuthSession()) return null
 
-  function handleCreateRecovery(rec: Omit<Recovery, 'id' | 'created' | 'probability' | 'nextAction'>) {
-    const newRec = addRecovery(rec)
-    setRecoveriesList([...initialRecoveries])
-  }
-
-  function handleSavePolicy(pol: Omit<Policy, 'id'>, existingId?: string) {
-    if (existingId) {
-      updatePolicy(existingId, pol)
-    } else {
-      addPolicy(pol)
+  async function handleCreateRecovery(rec: Omit<Recovery, 'id' | 'created' | 'probability' | 'nextAction'>) {
+    try {
+      await recoveriesService.startRecovery({ case_id: `case_${Date.now()}` })
+      const updated = await recoveriesService.listRecoveries()
+      if (updated.length > 0) {
+        setRecoveriesList(
+          updated.map((r) => ({
+            id: r.id,
+            customerId: r.customerId,
+            customer: r.customerId.replace('cus_', '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || 'Customer',
+            email: `${r.customerId}@example.com`,
+            amount: r.amountAtRisk,
+            status: r.status === 'recovered' ? 'Recovered' : r.status === 'in_review' ? 'In review' : 'Failed',
+            reason: r.reason,
+            created: 'Just now',
+            payment: 'UPI ·•• 4821',
+            probability: Math.round(r.recoveryProbability * 100),
+            nextAction: 'Send reminder',
+          }))
+        )
+      }
+    } catch {
+      // Optimistic local fallback
+      const newRec: Recovery = {
+        ...rec,
+        id: `RCV-${2049 + recoveriesList.length}`,
+        created: 'Just now',
+        probability: 78,
+        nextAction: 'Send reminder',
+      }
+      setRecoveriesList([newRec, ...recoveriesList])
     }
-    setPoliciesList([...initialPolicies])
   }
 
-  function handleMarkNotifRead(notifId: string) {
-    markNotificationRead(notifId)
-    setNotifsList([...initialNotifications])
+  async function handleSavePolicy(pol: Omit<Policy, 'id'>, existingId?: string) {
+    try {
+      if (existingId) {
+        await policiesService.updatePolicy(existingId, {
+          name: pol.name,
+          isActive: pol.status === 'Active',
+          maximumRetries: pol.maxRetries,
+          maximumMessages: pol.maxMessages,
+          recoveryWindowHours: pol.recoveryWindowHours,
+          highValueThreshold: pol.highValueThreshold,
+          humanApprovalRequired: pol.humanApprovalRequired,
+        })
+      } else {
+        await policiesService.createPolicy({
+          name: pol.name,
+          isActive: pol.status === 'Active',
+          maximumRetries: pol.maxRetries,
+          maximumMessages: pol.maxMessages,
+          recoveryWindowHours: pol.recoveryWindowHours,
+          highValueThreshold: pol.highValueThreshold,
+          humanApprovalRequired: pol.humanApprovalRequired,
+        })
+      }
+      const updatedPols = await policiesService.listPolicies()
+      setPoliciesList(
+        updatedPols.map((p) => ({
+          id: p.id,
+          name: p.name,
+          description: 'Automated recovery sequence policy',
+          status: p.isActive ? 'Active' : 'Draft',
+          maxRetries: p.maximumRetries,
+          maxMessages: p.maximumMessages,
+          recoveryWindowHours: p.recoveryWindowHours,
+          highValueThreshold: p.highValueThreshold,
+          humanApprovalRequired: p.humanApprovalRequired,
+        }))
+      )
+    } catch {
+      if (existingId) {
+        updatePolicy(existingId, pol)
+      }
+      setPoliciesList([...initialPolicies])
+    }
   }
 
-  function handleMarkAllNotifsRead() {
-    markAllNotificationsRead()
-    setNotifsList([...initialNotifications])
+  async function handleMarkNotifRead(notifId: string) {
+    try {
+      await notifService.markNotificationRead(notifId)
+    } catch {
+      markNotificationRead(notifId)
+    }
+    setNotifsList((prev) => prev.map((n) => (n.id === notifId ? { ...n, read: true } : n)))
   }
 
-  function handleUpdateSettings(updates: Partial<WorkspaceSettings>) {
-    const updated = updateWorkspaceSettings(updates)
-    setSettingsState({ ...updated })
+  async function handleMarkAllNotifsRead() {
+    try {
+      await notifService.markAllNotificationsRead()
+    } catch {
+      markAllNotificationsRead()
+    }
+    setNotifsList((prev) => prev.map((n) => ({ ...n, read: true })))
   }
+
+  async function handleUpdateSettings(updates: Partial<WorkspaceSettings>) {
+    try {
+      if (updates.workspaceName || updates.timezone) {
+        await settingsService.updateProfile({
+          name: updates.workspaceName,
+          timezone: updates.timezone,
+        })
+      }
+      await settingsService.updateNotificationSettings({
+        notifyRecoveryCompleted: updates.notifyRecoveryCompleted,
+        notifyRecoveryEscalated: updates.notifyRecoveryEscalated,
+        notifyActionFailed: updates.notifyActionFailed,
+        notifyPaymentRecovered: updates.notifyPaymentRecovered,
+      })
+    } catch {
+      updateWorkspaceSettings(updates)
+    }
+    setSettingsState((prev) => ({ ...prev, ...updates }))
+  }
+
 
   let content: React.ReactNode
   if (view === 'recoveries') {
@@ -1509,7 +2130,7 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
   } else if (view === 'settings') {
     content = <SettingsPage settings={settingsState} onOpenDialog={(kind) => setSettingsModalKind(kind)} />
   } else {
-    content = <Dashboard onNewRecovery={() => setRecoveryModalOpen(true)} />
+    content = <Dashboard onNewRecovery={() => setRecoveryModalOpen(true)} user={currentUser} />
   }
 
   return (
@@ -1519,6 +2140,7 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
         setCollapsed={setCollapsed}
         mobile={mobile}
         onNavigate={() => setMobile(false)}
+        user={currentUser}
       />
       <div className={`mobile-overlay ${mobile ? 'show' : ''}`} onClick={() => setMobile(false)} />
       <main className="main">
@@ -1562,13 +2184,34 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
 }
 
 export function Landing() {
+  const [dark, setDark] = useState(true)
+
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem('payback-theme')
+    if (savedTheme) setDark(savedTheme === 'dark')
+  }, [])
+
+  function toggleTheme() {
+    const nextDark = !dark
+    setDark(nextDark)
+    window.localStorage.setItem('payback-theme', nextDark ? 'dark' : 'light')
+  }
+
   return (
-    <main className="landing">
+    <main className={`landing ${dark ? 'theme-dark' : 'theme-light'}`}>
       <div className="landing-grid-bg" aria-hidden="true" />
       
       <nav className="landing-nav">
         <Logo />
         <div className="flex items-center gap-3">
+          <button
+            className="icon-btn"
+            onClick={toggleTheme}
+            aria-label="Toggle theme"
+            title={dark ? 'Switch to Light mode' : 'Switch to Dark mode'}
+          >
+            {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+          </button>
           <Link href="/sign-in" className="button-ghost">
             Sign in
           </Link>

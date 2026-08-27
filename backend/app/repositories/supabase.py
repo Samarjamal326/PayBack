@@ -203,12 +203,21 @@ class SupabaseRecoveryCaseRepository(RecoveryCaseRepository):
         offset: int = 0,
     ) -> list[RecoveryCase]:
         params = {"limit": str(limit), "offset": str(offset), "order": "created_at.desc"}
-        if merchant_id:
-            params["merchant_id"] = f"eq.{merchant_id}"
         if status:
             params["status"] = f"eq.{status}"
         rows = self.client.select("recovery_cases", params)
+        if merchant_id:
+            # If default/demo merchant or all legacy rows, include cases with None or default merchant
+            # For newly registered distinct merchants, match strictly on their merchant_id
+            rows_for_merchant = [r for r in rows if r.get("merchant_id") == merchant_id]
+            if rows_for_merchant:
+                return [RecoveryCase(**r) for r in rows_for_merchant]
+            # Fallback for the default demo account
+            if merchant_id in ("default", "merchant_default", "admin") or len(rows) > 0 and merchant_id.startswith("merchant_"):
+                return [RecoveryCase(**r) for r in rows if r.get("merchant_id") in (None, "default", "merchant_default", merchant_id)]
+            return []
         return [RecoveryCase(**r) for r in rows]
+
 
     def list_by_customer(self, customer_id: str, limit: int = 100) -> list[RecoveryCase]:
         rows = self.client.select("recovery_cases", {"customer_id": f"eq.{customer_id}", "limit": str(limit), "order": "created_at.desc"})
@@ -292,5 +301,97 @@ class SupabasePolicyRepository(PolicyRepository):
         mid = merchant_id or "default"
         rows = self.client.select("policies", {"merchant_id": f"eq.{mid}"})
         return [Policy(**r) for r in rows] if rows else [self.get_default()]
+
+
+class SupabaseMerchantRepository(MerchantRepository):
+    DB_COLUMNS = {"id", "name", "email", "phone", "timezone", "created_at"}
+
+    def __init__(self, client: SupabaseClient) -> None:
+        self.client = client
+
+    def save(self, merchant: Merchant) -> Merchant:
+        data = merchant.model_dump(mode="json")
+        db_data = {k: v for k, v in data.items() if k in self.DB_COLUMNS}
+        res = self.client.upsert("merchants", db_data)
+        return merchant.model_copy(update={k: res[k] for k in res if hasattr(merchant, k)})
+
+    def get(self, merchant_id: str) -> Optional[Merchant]:
+        rows = self.client.select("merchants", {"id": f"eq.{merchant_id}"})
+        return Merchant(**rows[0]) if rows else None
+
+    def get_by_email(self, email: str) -> Optional[Merchant]:
+        rows = self.client.select("merchants", {"email": f"eq.{email}"})
+        return Merchant(**rows[0]) if rows else None
+
+    def get_settings(self, merchant_id: str) -> MerchantSettings:
+        rows = self.client.select("merchant_settings", {"merchant_id": f"eq.{merchant_id}"})
+        if rows:
+            return MerchantSettings(**rows[0])
+        return MerchantSettings(merchant_id=merchant_id)
+
+    def save_settings(self, settings: MerchantSettings) -> MerchantSettings:
+        data = settings.model_dump(mode="json")
+        res = self.client.upsert("merchant_settings", data, on_conflict="merchant_id")
+        return MerchantSettings(**res)
+
+
+class SupabaseMessageDeliveryRepository(MessageDeliveryRepository):
+    def __init__(self, client: SupabaseClient) -> None:
+        self.client = client
+
+    def save(self, record: MessageDeliveryRecord) -> MessageDeliveryRecord:
+        data = record.model_dump(mode="json")
+        res = self.client.insert("message_delivery_records", data)
+        return MessageDeliveryRecord(**res)
+
+    def list_by_case(self, case_id: str) -> list[MessageDeliveryRecord]:
+        rows = self.client.select("message_delivery_records", {"recovery_case_id": f"eq.{case_id}", "order": "created_at.asc"})
+        return [MessageDeliveryRecord(**r) for r in rows]
+
+    def list_by_customer(self, customer_id: str) -> list[MessageDeliveryRecord]:
+        rows = self.client.select("message_delivery_records", {"customer_id": f"eq.{customer_id}", "order": "created_at.asc"})
+        return [MessageDeliveryRecord(**r) for r in rows]
+
+
+class SupabaseNotificationRepository(NotificationRepository):
+    def __init__(self, client: SupabaseClient) -> None:
+        self.client = client
+
+    def save(self, notification: Notification) -> Notification:
+        data = notification.model_dump(mode="json")
+        res = self.client.insert("notifications", data)
+        return Notification(**res)
+
+    def list_by_merchant(self, merchant_id: str, limit: int = 50, unread_only: bool = False) -> list[Notification]:
+        params = {"merchant_id": f"eq.{merchant_id}", "limit": str(limit), "order": "created_at.desc"}
+        if unread_only:
+            params["read"] = "eq.false"
+        rows = self.client.select("notifications", params)
+        return [Notification(**r) for r in rows]
+
+    def count_unread(self, merchant_id: str) -> int:
+        rows = self.client.select("notifications", {"merchant_id": f"eq.{merchant_id}", "read": "eq.false", "select": "id"})
+        return len(rows)
+
+    def mark_read(self, notification_id: str, merchant_id: str) -> Optional[Notification]:
+        res = self.client.upsert("notifications", {"id": notification_id, "merchant_id": merchant_id, "read": True})
+        return Notification(**res) if res else None
+
+
+class SupabaseProcessedWebhookRepository(ProcessedWebhookEventRepository):
+    def __init__(self, client: SupabaseClient) -> None:
+        self.client = client
+
+    def save(self, event: ProcessedWebhookEvent) -> ProcessedWebhookEvent:
+        data = event.model_dump(mode="json")
+        res = self.client.upsert("processed_webhook_events", data, on_conflict="id")
+        return ProcessedWebhookEvent(**res)
+
+    def get_by_provider_event_id(self, provider: str, provider_event_id: str) -> Optional[ProcessedWebhookEvent]:
+        rows = self.client.select("processed_webhook_events", {
+            "provider": f"eq.{provider}",
+            "provider_event_id": f"eq.{provider_event_id}",
+        })
+        return ProcessedWebhookEvent(**rows[0]) if rows else None
 
 

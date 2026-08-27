@@ -154,6 +154,7 @@ class RecoveryService:
             return existing
 
         case = RecoveryCase(
+            merchant_id=customer.merchant_id or transaction.merchant_id,
             transaction_id=transaction.id,
             customer_id=customer.id,
             amount_at_risk=transaction.amount,

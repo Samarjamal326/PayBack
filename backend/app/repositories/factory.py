@@ -33,7 +33,11 @@ from app.repositories.supabase import (
     SupabaseAuditRecordRepository,
     SupabaseClient,
     SupabaseCustomerRepository,
+    SupabaseMerchantRepository,
+    SupabaseMessageDeliveryRepository,
+    SupabaseNotificationRepository,
     SupabasePolicyRepository,
+    SupabaseProcessedWebhookRepository,
     SupabaseRecoveryCaseRepository,
     SupabaseTransactionRepository,
 )
@@ -90,10 +94,10 @@ def create_supabase_repositories(url: str, key: str) -> RepositoryBundle:
         actions=SupabaseActionRecordRepository(client),
         audits=SupabaseAuditRecordRepository(client),
         policies=SupabasePolicyRepository(client),
-        merchants=InMemoryMerchantRepository(),
-        message_deliveries=InMemoryMessageDeliveryRepository(),
-        notifications=InMemoryNotificationRepository(),
-        processed_webhooks=InMemoryProcessedWebhookEventRepository(),
+        merchants=SupabaseMerchantRepository(client),
+        message_deliveries=SupabaseMessageDeliveryRepository(client),
+        notifications=SupabaseNotificationRepository(client),
+        processed_webhooks=SupabaseProcessedWebhookRepository(client),
     )
 
 

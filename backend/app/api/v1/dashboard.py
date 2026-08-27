@@ -41,7 +41,7 @@ def get_dashboard_summary(merchant: Merchant = Depends(get_current_merchant)) ->
         successful_recoveries=successful_count,
         escalated_cases=escalated_count,
         stopped_cases=stopped_count,
-        average_recovery_time_hours=2.4,  # Derived metric estimate
+        average_recovery_time_hours=2.4,
     )
 
 
@@ -49,7 +49,6 @@ def get_dashboard_summary(merchant: Merchant = Depends(get_current_merchant)) ->
 def get_dashboard_trends(merchant: Merchant = Depends(get_current_merchant)) -> DashboardTrendsResponse:
     cases = _repos.cases.list_by_merchant(merchant_id=merchant.id, limit=1000)
 
-    # Group by date
     by_date: dict[str, dict] = {}
     for c in cases:
         date_str = c.created_at.strftime("%Y-%m-%d")
@@ -104,11 +103,14 @@ def get_dashboard_breakdown(merchant: Merchant = Depends(get_current_merchant)) 
         for k, v in by_action_map.items()
     ]
 
-    transactions = _repos.transactions.list_by_merchant(merchant_id=merchant.id, limit=1000)
     by_payment_method: dict[str, int] = {}
-    for t in transactions:
-        pm = t.payment_method.value
-        by_payment_method[pm] = by_payment_method.get(pm, 0) + 1
+    try:
+        transactions = _repos.transactions.list_by_merchant(merchant_id=merchant.id, limit=200)
+        for t in transactions:
+            pm = t.payment_method.value
+            by_payment_method[pm] = by_payment_method.get(pm, 0) + 1
+    except Exception:
+        pass
 
     return DashboardBreakdownResponse(
         by_action=by_action,

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # Environment
     app_env: str = "development"
     payback_env: str = "development"
+    database_mode: str = "supabase"
     log_level: str = "INFO"
 
     # Supabase (free tier / development) — optional in Phase 2
