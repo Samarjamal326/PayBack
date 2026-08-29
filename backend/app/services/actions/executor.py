@@ -122,23 +122,71 @@ class ActionExecutor:
             return result
 
         if action == RecoveryAction.SEND_EMAIL:
+            # First create a payment link to include in the email
+            payment_link_result = self._payment.create_payment_link(
+                transaction_id=transaction.id,
+                amount=transaction.amount,
+                customer_email=customer.email or "",
+                customer_phone=customer.phone,
+                customer_name=customer.name,
+            )
+            
+            # Update context with payment link
+            ctx = MessageContext(
+                customer_name=customer.name,
+                amount=transaction.amount,
+                currency=transaction.currency.value,
+                failure_reason=transaction.failure_reason,
+                payment_link=payment_link_result.external_ref,
+            )
+            
             body = self._generator.email_body(ctx)
             subject = "Action required — complete your payment"
-            result = self._messaging.send_email(customer.email or "", subject, body)
-
-            # Persist message delivery record if repository available
-            if self._delivery_repo:
-                rec = MessageDeliveryRecord(
-                    merchant_id=case.merchant_id,
-                    recovery_case_id=case.id,
-                    customer_id=customer.id,
-                    channel=MessageChannel.EMAIL,
-                    provider=DeliveryProvider.MOCK,
-                    provider_message_id=result.external_ref or f"email_{case.id[:8]}",
-                    status=MessageStatus.DELIVERED if result.outcome == RecoveryOutcome.RECOVERED or "stub" in result.detail else MessageStatus.SENT,
-                    content_preview=f"Subject: {subject}",
+            
+            # Use the new delivery provider if available, otherwise fallback to old messaging
+            if self._delivery_provider:
+                delivery_result = self._delivery_provider.send_email(
+                    recipient_email=customer.email or "",
+                    subject=subject,
+                    body_html=body,
+                    merchant_name=case.merchant_id,
                 )
-                self._delivery_repo.save(rec)
+                result = ActionResult(
+                    outcome=RecoveryOutcome.RECOVERED if delivery_result.success else RecoveryOutcome.FAILED,
+                    detail=delivery_result.failure_reason or "Email sent successfully",
+                    external_ref=payment_link_result.external_ref,  # Store payment link URL
+                )
+                
+                # Persist message delivery record if repository available
+                if self._delivery_repo:
+                    rec = MessageDeliveryRecord(
+                        merchant_id=case.merchant_id,
+                        recovery_case_id=case.id,
+                        customer_id=customer.id,
+                        channel=MessageChannel.EMAIL,
+                        provider=delivery_result.provider,
+                        provider_message_id=delivery_result.provider_message_id or f"email_{case.id[:8]}",
+                        status=delivery_result.status,
+                        content_preview=f"Subject: {subject} | Link: {payment_link_result.external_ref}",
+                    )
+                    self._delivery_repo.save(rec)
+            else:
+                # Fallback to old messaging interface
+                result = self._messaging.send_email(customer.email or "", subject, body)
+
+                # Persist message delivery record if repository available
+                if self._delivery_repo:
+                    rec = MessageDeliveryRecord(
+                        merchant_id=case.merchant_id,
+                        recovery_case_id=case.id,
+                        customer_id=customer.id,
+                        channel=MessageChannel.EMAIL,
+                        provider=DeliveryProvider.MOCK,
+                        provider_message_id=result.external_ref or f"email_{case.id[:8]}",
+                        status=MessageStatus.DELIVERED if result.outcome == RecoveryOutcome.RECOVERED or "stub" in result.detail else MessageStatus.SENT,
+                        content_preview=f"Subject: {subject} | Link: {payment_link_result.external_ref}",
+                    )
+                    self._delivery_repo.save(rec)
 
             return result
 

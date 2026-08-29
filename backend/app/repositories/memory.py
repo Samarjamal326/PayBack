@@ -78,10 +78,13 @@ class InMemoryCustomerRepository(CustomerRepository):
             return None
         return self.get(cid)
 
-    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> list[Customer]:
+    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0, include_unassigned: bool = False) -> list[Customer]:
         items = list(self._store.values())
         if merchant_id:
-            items = [c for c in items if c.merchant_id == merchant_id or c.merchant_id is None]
+            if include_unassigned:
+                items = [c for c in items if c.merchant_id == merchant_id or c.merchant_id is None]
+            else:
+                items = [c for c in items if c.merchant_id == merchant_id]
         return [c.model_copy() for c in items[offset : offset + limit]]
 
 
@@ -90,17 +93,45 @@ class InMemoryTransactionRepository(TransactionRepository):
         self._store: dict[str, Transaction] = {}
 
     def save(self, transaction: Transaction) -> Transaction:
-        self._store[transaction.id] = transaction.model_copy()
-        return transaction
+        # Convert enum values to strings for consistency with Supabase
+        data = transaction.model_dump(mode="json")
+        if "status" in data and hasattr(data["status"], "value"):
+            data["status"] = data["status"].value
+        if "currency" in data and hasattr(data["currency"], "value"):
+            data["currency"] = data["currency"].value
+        if "payment_method" in data and hasattr(data["payment_method"], "value"):
+            data["payment_method"] = data["payment_method"].value
+            
+        # Convert back to Transaction with string enums
+        from app.models.domain import TransactionStatus, Currency, PaymentMethod
+        if isinstance(data["status"], str):
+            data["status"] = TransactionStatus(data["status"])
+        if isinstance(data["currency"], str):
+            data["currency"] = Currency(data["currency"])
+        if isinstance(data["payment_method"], str):
+            data["payment_method"] = PaymentMethod(data["payment_method"])
+            
+        saved_transaction = Transaction(**data)
+        self._store[transaction.id] = saved_transaction
+        return saved_transaction
 
     def get(self, transaction_id: str) -> Optional[Transaction]:
         item = self._store.get(transaction_id)
         return item.model_copy() if item else None
 
-    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> list[Transaction]:
+    def delete(self, transaction_id: str) -> bool:
+        if transaction_id in self._store:
+            del self._store[transaction_id]
+            return True
+        return False
+
+    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0, include_unassigned: bool = False) -> list[Transaction]:
         items = list(self._store.values())
         if merchant_id:
-            items = [t for t in items if t.merchant_id == merchant_id or t.merchant_id is None]
+            if include_unassigned:
+                items = [t for t in items if t.merchant_id == merchant_id or t.merchant_id is None]
+            else:
+                items = [t for t in items if t.merchant_id == merchant_id]
         return [t.model_copy() for t in items[offset : offset + limit]]
 
     def list_by_customer(self, customer_id: str, limit: int = 100) -> list[Transaction]:
@@ -172,10 +203,14 @@ class InMemoryRecoveryCaseRepository(RecoveryCaseRepository):
         status: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        include_unassigned: bool = False,
     ) -> list[RecoveryCase]:
         items = list(self._store.values())
         if merchant_id:
-            items = [c for c in items if c.merchant_id == merchant_id or c.merchant_id is None]
+            if include_unassigned:
+                items = [c for c in items if c.merchant_id == merchant_id or c.merchant_id is None]
+            else:
+                items = [c for c in items if c.merchant_id == merchant_id]
         if status:
             items = [c for c in items if c.status.value == status or c.status == status]
         return [c.model_copy() for c in items[offset : offset + limit]]
@@ -221,8 +256,10 @@ class InMemoryAuditRecordRepository(AuditRecordRepository):
         records.append(record.model_copy())
         return record
 
-    def list_by_case(self, case_id: str) -> list[AuditRecord]:
-        return [r.model_copy() for r in self._store.get(case_id, [])]
+    def list_by_case(self, case_id: str, limit: int = 50) -> list[AuditRecord]:
+        # Optimized: Limit to most recent records for better performance
+        records = self._store.get(case_id, [])
+        return [r.model_copy() for r in records[-limit:]]
 
 
 class InMemoryPolicyRepository(PolicyRepository):

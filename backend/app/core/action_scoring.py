@@ -24,8 +24,8 @@ class ActionScorer:
     ACTION_CONVERSION_WEIGHTS = {
         RecoveryAction.RETRY_PAYMENT: 0.90,
         RecoveryAction.CREATE_PAYMENT_LINK: 0.85,
-        RecoveryAction.SEND_WHATSAPP: 0.90,
-        RecoveryAction.SEND_EMAIL: 0.70,
+        RecoveryAction.SEND_WHATSAPP: 0.90,  # Disabled by making ineligible in scoring
+        RecoveryAction.SEND_EMAIL: 0.85,
         RecoveryAction.ESCALATE: 0.80,
         RecoveryAction.STOP: 0.00,
     }
@@ -134,12 +134,12 @@ class ActionScorer:
         )
 
 
-        # 5. SEND_WHATSAPP candidate
+        # 5. SEND_WHATSAPP candidate - DISABLED (WhatsApp is paid, using email instead)
         wa_cost = policy.action_costs.get(RecoveryAction.SEND_WHATSAPP.value, 1.0)
         wa_prob = round(base_probability * self.ACTION_CONVERSION_WEIGHTS[RecoveryAction.SEND_WHATSAPP], 4)
         wa_ev = round((wa_prob * amount) - wa_cost, 2)
-        wa_eligible = True
-        wa_reason = None
+        wa_eligible = False  # Disabled - WhatsApp is paid service
+        wa_reason = "WhatsApp is disabled - using email instead"
 
         if ctx.messages_sent >= policy.maximum_messages:
             wa_eligible = False

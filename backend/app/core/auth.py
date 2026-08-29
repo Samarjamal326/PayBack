@@ -131,11 +131,15 @@ def get_auth_provider() -> AuthProvider:
     return _auth_provider
 
 
-# Default fallback merchant for development/test mode
+# Development merchant — owns legacy NULL-merchant_id test data after reconciliation
+DEV_MERCHANT_ID = "merchant_default"
+DEV_MERCHANT_EMAIL = "admin@payback.io"
+
+# Default fallback merchant for development/test mode (no JWT)
 DEFAULT_TEST_MERCHANT = Merchant(
-    id="merchant_default",
-    name="Acme Corp Test",
-    email="merchant@example.com",
+    id=DEV_MERCHANT_ID,
+    name="PayBack Development",
+    email=DEV_MERCHANT_EMAIL,
     timezone="Asia/Kolkata",
 )
 

@@ -17,6 +17,8 @@ export class ApiClientError extends Error {
   }
 }
 
+const INVALID_TOKENS = new Set(['', 'dev-demo-token', 'mock-jwt-token-dev-mode'])
+
 function buildHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -24,7 +26,7 @@ function buildHeaders(extra: Record<string, string> = {}): Record<string, string
     ...extra,
   }
   const token = getAuthToken()
-  if (token) {
+  if (token && !INVALID_TOKENS.has(token)) {
     headers['Authorization'] = `Bearer ${token}`
   }
   return headers

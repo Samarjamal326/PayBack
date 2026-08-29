@@ -1,6 +1,24 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
-@theme inline { --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card); --color-card-foreground: var(--card-foreground); --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground); --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground); --color-border: var(--border); --color-success: var(--success); --color-warning: var(--warning); --color-danger: var(--danger); --font-sans: var(--font-inter); --font-serif: var(--font-newsreader); }
+
+/* Tailwind CSS v4 @theme directive - may show as unknown in some CSS linters */
+/* This is a valid Tailwind CSS v4 feature for theme configuration */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-newsreader);
+}
 
 :root, .theme-dark {
   --background: #090909;
@@ -266,6 +284,13 @@ button { cursor: pointer; }
 .preview-metrics div { padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--box-bg); }
 .preview-metrics small { display: block; color: var(--muted-foreground); font-size: 10px; }
 .preview-metrics b { display: block; margin: 6px 0; font-size: 16px; color: var(--foreground); }
+
+/* Payment Link Display Styles */
+.payment-link-display { padding: 20px; }
+.payment-link-box { display: flex; gap: 8px; margin-top: 12px; }
+.payment-link-input { flex: 1; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--muted); color: var(--foreground); font-size: 13px; outline: none; }
+.payment-link-input:focus { border-color: var(--primary); }
+.button-sm { padding: 6px 12px; font-size: 11px; }
 .preview-metrics i { display: block; color: var(--success); font-size: 10px; font-style: normal; font-weight: 600; }
 .preview-bars { display: flex; align-items: end; gap: 8px; height: 100px; margin-top: 20px; padding-top: 16px; border-bottom: 1px solid var(--border); background: repeating-linear-gradient(to bottom, transparent, transparent 24px, var(--chart-grid) 25px); }
 .preview-bars span { flex: 1; border-radius: 3px 3px 0 0; background: var(--chart-bar); }

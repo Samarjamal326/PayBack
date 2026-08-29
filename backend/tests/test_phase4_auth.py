@@ -1,6 +1,10 @@
 import pytest
+from fastapi.testclient import TestClient
 from app.core.auth import SupabaseJWTAuthProvider, StandardJWT, get_current_merchant, DEFAULT_TEST_MERCHANT
+from app.main import app
 from app.models.domain import Merchant
+
+client = TestClient(app)
 
 
 def test_standard_jwt_encode_decode():
@@ -37,6 +41,15 @@ def test_get_current_merchant_fallback_dev_mode():
     merchant = get_current_merchant(credentials=None, x_merchant_id=None)
     assert merchant.id == DEFAULT_TEST_MERCHANT.id
     assert merchant.email == DEFAULT_TEST_MERCHANT.email
+
+
+def test_demo_admin_login():
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@payback.io", "password": "demo"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["merchant_id"] == DEFAULT_TEST_MERCHANT.id
 
 
 def test_get_current_merchant_explicit_header():

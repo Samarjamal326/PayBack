@@ -27,7 +27,7 @@ export function getAuthSession(): AuthSession | null {
     try {
       const parsed = JSON.parse(legacy)
       return {
-        accessToken: 'dev-demo-token',
+        accessToken: '',
         tokenType: 'bearer',
         merchantId: 'merchant_default',
         name: parsed.name || 'Demo Merchant',
@@ -71,7 +71,7 @@ export function getDemoSession(): DemoSession | null {
 
 export function setDemoSession(session: DemoSession) {
   setAuthSession({
-    accessToken: 'dev-demo-token',
+    accessToken: '',
     tokenType: 'bearer',
     merchantId: 'merchant_default',
     name: session.name,

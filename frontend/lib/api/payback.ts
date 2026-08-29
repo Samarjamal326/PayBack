@@ -117,7 +117,7 @@ export let workspaceSettings: WorkspaceSettings = {
 
 export function formatINR(value: number) { return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value) }
 export function getRecovery(id: string) { return recoveries.find((r) => r.id === id) ?? recoveries[0] }
-export function getCustomer(id: string) { return customers.find((c) => c.id === id) ?? customers[0] }
+export function getCustomer(id: string) { return customers.find((c) => c.id === id) ?? null }
 export function getCustomerPayments(id: string) { return payments.filter((p) => p.customerId === id) }
 export function getCustomerRecoveries(id: string) { return recoveries.filter((r) => r.customerId === id) }
 export function getCustomerTimeline(id: string) { return timelines[id] ?? [] }

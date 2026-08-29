@@ -1,0 +1,15 @@
+﻿{
+  "event": "payment_link.paid",
+  "id": "evt_test_001",
+  "payload": {
+    "payment_link": {
+      "entity": {
+        "id": "plink_123",
+        "amount": 10000,
+        "notes": {
+          "transaction_id": "6a9d8336-6afc-475c-903b-e143dd401692"
+        }
+      }
+    }
+  }
+}

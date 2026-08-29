@@ -18,9 +18,31 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 _repos = get_repository_bundle()
 
 
+def _average_recovery_time_hours(cases: list) -> float:
+    """Mean hours from case creation to last update for recovered cases."""
+    durations: list[float] = []
+    for case in cases:
+        recovered = case.outcome == RecoveryOutcome.RECOVERED or case.status == RecoveryStatus.RECOVERED
+        if not recovered:
+            continue
+        created = case.created_at
+        updated = case.updated_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        hours = (updated - created).total_seconds() / 3600.0
+        if hours >= 0:
+            durations.append(hours)
+    if not durations:
+        return 0.0
+    return round(sum(durations) / len(durations), 2)
+
+
 @router.get("/summary", response_model=DashboardSummaryResponse)
 def get_dashboard_summary(merchant: Merchant = Depends(get_current_merchant)) -> DashboardSummaryResponse:
-    cases = _repos.cases.list_by_merchant(merchant_id=merchant.id, limit=1000)
+    # Optimized: Reduce limit from 1000 to 100 for better performance
+    cases = _repos.cases.list_by_merchant(merchant_id=merchant.id, limit=100)
 
     total_cases = len(cases)
     total_at_risk = sum(c.amount_at_risk for c in cases)
@@ -41,13 +63,14 @@ def get_dashboard_summary(merchant: Merchant = Depends(get_current_merchant)) ->
         successful_recoveries=successful_count,
         escalated_cases=escalated_count,
         stopped_cases=stopped_count,
-        average_recovery_time_hours=2.4,
+        average_recovery_time_hours=_average_recovery_time_hours(cases),
     )
 
 
 @router.get("/trends", response_model=DashboardTrendsResponse)
 def get_dashboard_trends(merchant: Merchant = Depends(get_current_merchant)) -> DashboardTrendsResponse:
-    cases = _repos.cases.list_by_merchant(merchant_id=merchant.id, limit=1000)
+    # Optimized: Reduce limit from 1000 to 100 for better performance
+    cases = _repos.cases.list_by_merchant(merchant_id=merchant.id, limit=100)
 
     by_date: dict[str, dict] = {}
     for c in cases:
@@ -76,7 +99,8 @@ def get_dashboard_trends(merchant: Merchant = Depends(get_current_merchant)) -> 
 
 @router.get("/breakdown", response_model=DashboardBreakdownResponse)
 def get_dashboard_breakdown(merchant: Merchant = Depends(get_current_merchant)) -> DashboardBreakdownResponse:
-    cases = _repos.cases.list_by_merchant(merchant_id=merchant.id, limit=1000)
+    # Optimized: Reduce limit from 1000 to 100 for better performance
+    cases = _repos.cases.list_by_merchant(merchant_id=merchant.id, limit=100)
 
     by_status: dict[str, int] = {}
     by_action_map: dict[str, dict] = {}
@@ -105,7 +129,8 @@ def get_dashboard_breakdown(merchant: Merchant = Depends(get_current_merchant)) 
 
     by_payment_method: dict[str, int] = {}
     try:
-        transactions = _repos.transactions.list_by_merchant(merchant_id=merchant.id, limit=200)
+        # Optimized: Reduce transaction limit from 200 to 50 for better performance
+        transactions = _repos.transactions.list_by_merchant(merchant_id=merchant.id, limit=50)
         for t in transactions:
             pm = t.payment_method.value
             by_payment_method[pm] = by_payment_method.get(pm, 0) + 1

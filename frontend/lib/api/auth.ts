@@ -6,7 +6,7 @@ import { setAuthSession } from '@/lib/auth-session'
 export async function login(email: string, password?: string): Promise<AuthSession> {
   if (!isApiMode()) {
     const mockSession: AuthSession = {
-      accessToken: 'mock-jwt-token-dev-mode',
+      accessToken: '',
       tokenType: 'bearer',
       merchantId: 'merchant_default',
       name: email.split('@')[0].replace(/[^a-zA-Z]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || 'Demo Merchant',
@@ -16,47 +16,33 @@ export async function login(email: string, password?: string): Promise<AuthSessi
     return mockSession
   }
 
-  try {
-    const raw = await apiFetch<{
-      access_token: string
-      token_type: string
-      merchant_id: string
-      name: string
-      email: string
-    }>('/api/v1/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password: password || 'demo-password' }),
-    })
+  const raw = await apiFetch<{
+    access_token: string
+    token_type: string
+    merchant_id: string
+    name: string
+    email: string
+  }>('/api/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password: password || 'demo-password' }),
+  })
 
-    const session: AuthSession = {
-      accessToken: raw.access_token,
-      tokenType: raw.token_type,
-      merchantId: raw.merchant_id,
-      name: raw.name,
-      email: raw.email,
-    }
-    setAuthSession(session)
-    return session
-  } catch (err) {
-    // If backend is unreachable / offline, fall back seamlessly to local session
-    console.warn('Backend /auth/login unreachable, falling back to local session:', err)
-    const mockSession: AuthSession = {
-      accessToken: 'mock-jwt-token-dev-mode',
-      tokenType: 'bearer',
-      merchantId: 'merchant_default',
-      name: email.split('@')[0].replace(/[^a-zA-Z]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || 'Demo Merchant',
-      email,
-    }
-    setAuthSession(mockSession)
-    return mockSession
+  const session: AuthSession = {
+    accessToken: raw.access_token,
+    tokenType: raw.token_type,
+    merchantId: raw.merchant_id,
+    name: raw.name,
+    email: raw.email,
   }
+  setAuthSession(session)
+  return session
 }
 
 
 export async function register(name: string, email: string, phone?: string, password?: string): Promise<AuthSession> {
   if (!isApiMode()) {
     const mockSession: AuthSession = {
-      accessToken: 'mock-jwt-token-dev-mode',
+      accessToken: '',
       tokenType: 'bearer',
       merchantId: 'merchant_default',
       name,

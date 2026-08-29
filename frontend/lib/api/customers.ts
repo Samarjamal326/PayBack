@@ -10,7 +10,10 @@ import {
 
 export async function listCustomers(params?: { limit?: number; offset?: number }): Promise<ApiCustomer[]> {
   if (!isApiMode()) {
-    return mockCustomers.map((c) => ({
+    const limit = params?.limit || 100
+    const offset = params?.offset || 0
+    const endIndex = Math.min(offset + limit, mockCustomers.length)
+    return mockCustomers.slice(offset, endIndex).map((c) => ({
       id: c.id,
       name: c.name,
       email: c.email,

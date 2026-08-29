@@ -31,6 +31,7 @@ class StubPaymentProvider(PaymentActionProvider):
             outcome=RecoveryOutcome.FAILED,
             detail=f"[stub] create_payment_link called for tx={transaction_id}",
             external_ref="https://rzp.io/i/stub_test_link",
+            external_id="order_stub_test_123",
         )
 
 

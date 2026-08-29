@@ -12,6 +12,7 @@ from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.events import router as events_router
 from app.api.v1.health import router as health_router
 from app.api.v1.notifications import router as notifications_router
+from app.api.v1.payments import router as payments_router
 from app.api.v1.policies import router as policies_router
 from app.api.v1.recoveries import router as recoveries_router
 from app.api.v1.settings import router as settings_router
@@ -52,6 +53,7 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(customers_router, prefix="/api/v1")
+app.include_router(payments_router, prefix="/api/v1")
 app.include_router(recoveries_router, prefix="/api/v1/recoveries")
 app.include_router(recoveries_router, prefix="/api/v1/recovery")
 app.include_router(policies_router, prefix="/api/v1")

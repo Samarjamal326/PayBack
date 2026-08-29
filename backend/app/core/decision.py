@@ -250,9 +250,9 @@ def evaluate(
 def _select_action(transaction: Transaction) -> RecoveryAction:
     """Choose the most appropriate initial action based on transaction context."""
     if transaction.status == TransactionStatus.FAILED:
-        return RecoveryAction.CREATE_PAYMENT_LINK
+        return RecoveryAction.SEND_EMAIL  # Send email with payment link for failed payments
     if transaction.status == TransactionStatus.ABANDONED:
-        return RecoveryAction.SEND_WHATSAPP
+        return RecoveryAction.SEND_EMAIL  # Send email for abandoned payments
     return RecoveryAction.RETRY_PAYMENT
 
 

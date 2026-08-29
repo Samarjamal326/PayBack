@@ -4,8 +4,8 @@ Validates exact amount, paise conversion, payment link creation, and error handl
 """
 from __future__ import annotations
 
-import json
 import httpx
+import json
 import pytest
 
 from app.models.domain import RecoveryOutcome
@@ -19,22 +19,45 @@ class TestRazorpayTestModeProvider:
         def handler(request: httpx.Request) -> httpx.Response:
             recorded_requests.append(request)
             data = json.loads(request.read())
-            # Verify exact amount in paise: 2499.00 INR -> 249900 paise
-            assert data["amount"] == 249900
-            assert data["currency"] == "INR"
-            assert data["notes"]["transaction_id"] == "tx_123"
-            assert data["customer"]["name"] == "Kavita"
-            assert data["customer"]["email"] == "kavita@example.com"
-
-            return httpx.Response(
-                200,
-                json={
-                    "id": "plink_test_999",
-                    "short_url": "https://rzp.io/i/test_link_999",
-                    "status": "created",
-                    "amount": 249900,
-                },
-            )
+            
+            # Handle order creation request
+            if "/orders" in str(request.url):
+                # Verify exact amount in paise: 2499.00 INR -> 249900 paise
+                assert data["amount"] == 249900
+                assert data["currency"] == "INR"
+                assert data["notes"]["transaction_id"] == "tx_123"
+                
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "order_test_123",
+                        "amount": 249900,
+                        "currency": "INR",
+                        "receipt": "payback_tx_123",
+                    },
+                )
+            
+            # Handle payment link creation request
+            elif "/payment_links" in str(request.url):
+                # Verify payment link payload
+                assert data["amount"] == 249900
+                assert data["currency"] == "INR"
+                assert data["customer"]["name"] == "Kavita"
+                assert data["customer"]["email"] == "kavita@example.com"
+                assert data["customer"]["contact"] == "+919876543210"
+                assert data["notes"]["transaction_id"] == "tx_123"
+                
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "plink_test_999",
+                        "short_url": "https://rzp.io/i/test_link_999",
+                        "status": "created",
+                        "amount": 249900,
+                    },
+                )
+            
+            return httpx.Response(404, json={"error": "Not found"})
 
         client = httpx.Client(transport=httpx.MockTransport(handler))
         provider = RazorpayPaymentProvider(
@@ -54,7 +77,7 @@ class TestRazorpayTestModeProvider:
         assert result.outcome == RecoveryOutcome.FAILED  # Pending webhook payment
         assert result.external_ref == "https://rzp.io/i/test_link_999"
         assert "plink_test_999" in result.detail
-        assert len(recorded_requests) == 1
+        assert len(recorded_requests) == 2  # Order creation + payment link creation
 
     def test_create_payment_link_handles_api_error_gracefully(self):
         def handler(request: httpx.Request) -> httpx.Response:

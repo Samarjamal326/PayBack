@@ -96,12 +96,16 @@ class OllamaMessageGenerator(MessageGenerator):
             f"Write a brief, professional HTML email body regarding a failed payment.\n"
             "Rules:\n"
             "- Do not invent order details, shipping status, discounts, or customer support contact placeholders.\n"
+            "- Make the email personalized by using the customer's name and specific amount.\n"
+            "- Address the specific failure reason if provided.\n"
             f"- Customer Name: {ctx.customer_name}\n"
             f"- Transaction Amount: {ctx.currency} {ctx.amount:,.2f}\n"
+            f"- Failure Reason: {ctx.failure_reason or 'temporary connection error'}\n"
             f"- {link_instruction}\n"
             "Return ONLY the clean HTML fragment starting with <p> and ending with </p> without markdown code fences."
         )
 
         generated = self._call_ollama(prompt)
+        logger.info(f"Generated email for {ctx.customer_name}: {generated[:100] if generated else 'None'}...")
         return MessageValidator.validate_email(generated, ctx)
 

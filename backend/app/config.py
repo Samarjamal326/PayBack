@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # Environment
     app_env: str = "development"
     payback_env: str = "development"
-    database_mode: str = "supabase"
+    database_mode: str = "memory"
     log_level: str = "INFO"
 
     # Supabase (free tier / development) — optional in Phase 2
@@ -46,13 +46,21 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 1440  # 24 hours
 
     # Messaging Delivery Providers
-    # 'mock' | 'smtp' | 'whatsapp'
-    message_delivery_provider: str = "mock"
+    # 'mock' | 'resend' | 'smtp' | 'whatsapp'
+    message_delivery_provider: str = "resend"
+    
+    # Resend Email Configuration
+    resend_api_key: str = ""
+    resend_from_email: str = "onboarding@resend.dev"
+    
+    # SMTP Email Configuration (fallback)
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from_email: str = "recovery@payback.ai"
+    
+    # WhatsApp Configuration
     whatsapp_api_url: str = ""
     whatsapp_api_token: str = ""
     whatsapp_from_phone: str = ""
@@ -71,6 +79,10 @@ class Settings(BaseSettings):
     background_executor_type: str = "in_memory"
     background_max_workers: int = 4
 
+    # Cloudflare Tunnel (for Razorpay webhooks in development)
+    cloudflare_tunnel_id: str = ""
+    cloudflare_tunnel_hostname: str = "api.payback.local"
+
     def is_razorpay_configured(self) -> bool:
         return bool(self.razorpay_key_id and self.razorpay_key_secret)
 
@@ -82,6 +94,9 @@ class Settings(BaseSettings):
 
     def is_whatsapp_configured(self) -> bool:
         return bool(self.whatsapp_api_url and self.whatsapp_api_token)
+
+    def is_resend_configured(self) -> bool:
+        return bool(self.resend_api_key)
 
     def validate_razorpay_test_mode(self) -> bool:
         """
@@ -109,6 +124,14 @@ class Settings(BaseSettings):
         if self.razorpay_key_id.startswith("rzp_test_"):
             return "TEST"
         return "INVALID"
+
+    @property
+    def webhook_url(self) -> str:
+        """Returns the webhook URL for Razorpay configuration."""
+        if self.cloudflare_tunnel_hostname:
+            return f"https://{self.cloudflare_tunnel_hostname}/api/v1/events/webhook/razorpay"
+        # Fallback to localhost for development
+        return "http://localhost:8000/api/v1/events/webhook/razorpay"
 
 
 settings = Settings()

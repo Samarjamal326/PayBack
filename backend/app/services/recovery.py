@@ -30,6 +30,7 @@ from app.services.actions.stubs import (
     StubMessagingProvider,
     StubPaymentProvider,
 )
+from app.services.messaging.interfaces import DeliveryProviderAdapter
 from app.services.llm.huggingface import HuggingFaceMessageGenerator
 from app.services.llm.mock import MockMessageGenerator
 
@@ -102,12 +103,17 @@ def _default_executor(repos: Optional[RepositoryBundle] = None) -> ActionExecuto
 
     llm_generator = get_message_generator(settings)
     delivery_repo = repos.message_deliveries if repos else None
+    
+    # Add delivery provider for email/messaging
+    from app.services.messaging.factory import get_delivery_provider
+    delivery_provider = get_delivery_provider(settings)
 
     return ActionExecutor(
         payment=payment_provider,
         messaging=StubMessagingProvider(),
         escalation=StubEscalationProvider(),
         message_generator=llm_generator,
+        delivery_provider=delivery_provider,
         delivery_repo=delivery_repo,
     )
 
@@ -127,16 +133,43 @@ class RecoveryService:
         executor: Optional[ActionExecutor] = None,
         repos: Optional[RepositoryBundle] = None,
     ) -> None:
-        self._repos = repos or get_repository_bundle()
-        self._executor = executor or _default_executor(self._repos)
-        self._graph = build_recovery_graph(self._executor).compile()
+        self._repos_override = repos
+        self._executor = executor
+        self._graph = None
 
+    def _ensure_graph(self):
+        if self._graph is None:
+            self._executor = self._executor or _default_executor(self._repos)
+            self._graph = build_recovery_graph(self._executor).compile()
+        return self._graph
 
-        # Backwards-compatible proxy mappings
-        self._cases = _RepoDictProxy(self._repos.cases)
-        self._transactions = _RepoDictProxy(self._repos.transactions)
-        self._customers = _RepoDictProxy(self._repos.customers)
-        self._history = _ActionHistoryProxy(self._repos.actions)
+    @property
+    def _repos(self) -> RepositoryBundle:
+        return self._repos_override or get_repository_bundle()
+
+    @property
+    def _customers_repo(self):
+        return self._repos.customers
+
+    @property
+    def _transactions_repo(self):
+        return self._repos.transactions
+
+    @property
+    def _cases_repo(self):
+        return self._repos.cases
+
+    @property
+    def _actions_repo(self):
+        return self._repos.actions
+
+    @property
+    def _audits_repo(self):
+        return self._repos.audits
+
+    @property
+    def _policies_repo(self):
+        return self._repos.policies
 
     def ingest_payment_event(self, transaction: Transaction, customer: Customer) -> RecoveryCase:
         """
@@ -206,7 +239,7 @@ class RecoveryService:
             "error": None,
         }
 
-        final_state = self._graph.invoke(initial_state)
+        final_state = self._ensure_graph().invoke(initial_state)
         updated_case: RecoveryCase = final_state["case"]
 
         # Persist updated case
@@ -297,13 +330,19 @@ class RecoveryService:
 
         return recovered_case
 
+        return recovered_case
+
     def record_audit_event(
         self,
         case_id: str,
         event_type: AuditEventType,
         detail: str,
     ) -> AuditRecord:
+        case = self._cases_repo.get(case_id)
+        if not case:
+            raise KeyError(f"Recovery case '{case_id}' not found.")
         record = AuditRecord(
+            merchant_id=case.merchant_id,
             recovery_case_id=case_id,
             event_type=event_type,
             detail=detail,
@@ -323,31 +362,10 @@ class RecoveryService:
         self.get_case(case_id)  # verify case exists
         return self._actions_repo.list_by_case(case_id)
 
-    def get_audit_history(self, case_id: str) -> list[AuditRecord]:
+    def get_audit_history(self, case_id: str, limit: int = 50) -> list[AuditRecord]:
         self.get_case(case_id)  # verify case exists
-        return self._audits_repo.list_by_case(case_id)
-
-    # Repository properties for internal access
-    @property
-    def _customers_repo(self):
-        return self._repos.customers
-
-    @property
-    def _transactions_repo(self):
-        return self._repos.transactions
-
-    @property
-    def _cases_repo(self):
-        return self._repos.cases
-
-    @property
-    def _actions_repo(self):
-        return self._repos.actions
+        return self._audits_repo.list_by_case(case_id, limit)
 
     @property
     def _audits_repo(self):
         return self._repos.audits
-
-    @property
-    def _policies_repo(self):
-        return self._repos.policies

@@ -14,7 +14,6 @@ from app.core.auth import get_current_merchant
 from app.models.domain import Merchant, Policy
 from app.repositories.factory import get_repository_bundle
 from app.services.recovery import RecoveryService
-
 router = APIRouter(tags=["recoveries"])
 _service = RecoveryService()
 _repos = get_repository_bundle()
@@ -47,7 +46,7 @@ def get_recovery_case(
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
-    if case.merchant_id and case.merchant_id != merchant.id:
+    if case.merchant_id != merchant.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: recovery case belongs to another merchant.")
 
     return RecoveryCaseResponse(**case.model_dump())
@@ -61,7 +60,7 @@ def get_recovery_actions(
     case = _repos.cases.get(recovery_id)
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Recovery case '{recovery_id}' not found.")
-    if case.merchant_id and case.merchant_id != merchant.id:
+    if case.merchant_id != merchant.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
     records = _service.get_action_history(recovery_id)
@@ -72,15 +71,17 @@ def get_recovery_actions(
 @router.get("/{recovery_id}/audit", response_model=list[AuditRecordResponse])
 def get_recovery_timeline(
     recovery_id: str,
+    limit: int = 50,
     merchant: Merchant = Depends(get_current_merchant),
 ) -> list[AuditRecordResponse]:
     case = _repos.cases.get(recovery_id)
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Recovery case '{recovery_id}' not found.")
-    if case.merchant_id and case.merchant_id != merchant.id:
+    if case.merchant_id != merchant.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
-    records = _service.get_audit_history(recovery_id)
+    # Optimized: Limit timeline records for better performance
+    records = _service.get_audit_history(recovery_id, limit)
     return [AuditRecordResponse(**r.model_dump()) for r in records]
 
 
@@ -92,7 +93,7 @@ def get_recovery_messages(
     case = _repos.cases.get(recovery_id)
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Recovery case '{recovery_id}' not found.")
-    if case.merchant_id and case.merchant_id != merchant.id:
+    if case.merchant_id != merchant.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
     records = _repos.message_deliveries.list_by_case(recovery_id)

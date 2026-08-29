@@ -66,12 +66,22 @@ class EmailDeliveryProvider(DeliveryProviderAdapter):
             import smtplib
             from email.mime.multipart import MIMEMultipart
             from email.mime.text import MIMEText
+            from email.utils import formataddr
+            import time
 
             msg = MIMEMultipart("alternative")
-            sender = f"{merchant_name or 'PayBack Recovery'} <{self.from_email}>"
+            sender = formataddr((merchant_name or 'PayBack Recovery', self.from_email))
             msg["Subject"] = subject
             msg["From"] = sender
             msg["To"] = recipient_email
+            
+            # Add headers to help prevent spam
+            msg["X-Priority"] = "3"
+            msg["X-MSMail-Priority"] = "Normal"
+            msg["X-Mailer"] = "PayBack Recovery System"
+            msg["Date"] = time.strftime("%a, %d %b %Y %H:%M:%S %z")
+            msg["Message-ID"] = f"<{uuid.uuid4().hex}@{self.from_email.split('@')[1]}>"
+            
             msg.attach(MIMEText(body_html, "html"))
 
             with smtplib.SMTP(self.host, self.port, timeout=10) as server:

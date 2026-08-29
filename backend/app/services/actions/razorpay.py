@@ -57,7 +57,7 @@ class RazorpayPaymentProvider(PaymentActionProvider):
         customer_name: Optional[str] = None,
     ) -> ActionResult:
         """
-        Creates a Razorpay Test Mode Payment Link for the exact amount at risk.
+        Creates a Razorpay Test Mode Order and Payment Link for the exact amount at risk.
         Converts INR amount to paise (1 INR = 100 paise).
         """
         if not self.key_id or not self.key_secret:
@@ -69,21 +69,12 @@ class RazorpayPaymentProvider(PaymentActionProvider):
             )
 
         amount_in_paise = int(round(amount * 100))
-        payload = {
+        
+        # First create an order
+        order_payload = {
             "amount": amount_in_paise,
             "currency": "INR",
-            "accept_partial": False,
-            "description": f"PayBack recovery for transaction {transaction_id}",
-            "customer": {
-                "name": customer_name or "Customer",
-                "email": customer_email or "",
-                "contact": customer_phone or "",
-            },
-            "notify": {
-                "sms": False,
-                "email": False,
-            },
-            "reminder_enable": False,
+            "receipt": f"payback_{transaction_id}",
             "notes": {
                 "transaction_id": transaction_id,
                 "recovery_source": "payback_ai_recovery",
@@ -92,16 +83,47 @@ class RazorpayPaymentProvider(PaymentActionProvider):
 
         try:
             client = self._get_client()
-            resp = client.post(f"{self.BASE_URL}/payment_links", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            link_url = data.get("short_url") or data.get("url") or f"https://rzp.io/i/{data.get('id')}"
-            link_id = data.get("id", "unknown_link_id")
+            
+            # Create order
+            order_resp = client.post(f"{self.BASE_URL}/orders", json=order_payload)
+            order_resp.raise_for_status()
+            order_data = order_resp.json()
+            order_id = order_data.get("id")
+            
+            # Create payment link for the order
+            link_payload = {
+                "amount": amount_in_paise,
+                "currency": "INR",
+                "accept_partial": False,
+                "description": f"PayBack payment for transaction {transaction_id}",
+                "customer": {
+                    "name": customer_name or "Customer",
+                    "email": customer_email or "",
+                    "contact": customer_phone or "",
+                },
+                "notify": {
+                    "sms": False,
+                    "email": False,
+                },
+                "reminder_enable": False,
+                "notes": {
+                    "transaction_id": transaction_id,
+                    "order_id": order_id,
+                    "recovery_source": "payback_ai_recovery",
+                },
+            }
+            
+            link_resp = client.post(f"{self.BASE_URL}/payment_links", json=link_payload)
+            link_resp.raise_for_status()
+            link_data = link_resp.json()
+            link_url = link_data.get("short_url") or link_data.get("url") or f"https://rzp.io/i/{link_data.get('id')}"
+            link_id = link_data.get("id", "unknown_link_id")
 
             return ActionResult(
                 outcome=RecoveryOutcome.FAILED,  # Status remains pending until customer pays via webhook
-                detail=f"Created Razorpay Test Payment Link {link_id}",
+                detail=f"Created Razorpay Test Order {order_id} and Payment Link {link_id}",
                 external_ref=link_url,
+                external_id=order_id,  # Return order ID for storage
             )
         except httpx.HTTPStatusError as exc:
             logger.error("Razorpay API error: %s - %s", exc.response.status_code, exc.response.text)

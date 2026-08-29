@@ -1,12 +1,33 @@
 from datetime import datetime
+import logging
 from typing import Any, Optional
 import httpx
+
+logger = logging.getLogger(__name__)
+
+
+class SupabaseAccessError(RuntimeError):
+    """Raised when Supabase REST denies access — do not silently swallow."""
+
+    def __init__(self, table: str, status_code: int, detail: str = "") -> None:
+        self.table = table
+        self.status_code = status_code
+        super().__init__(
+            f"Supabase REST access denied for table '{table}' (HTTP {status_code}). "
+            "Verify SUPABASE_SERVICE_ROLE_KEY is configured and migration 002 grants are applied. "
+            f"{detail}".strip()
+        )
 
 from app.models.domain import (
     ActionRecord,
     AuditRecord,
     Customer,
+    Merchant,
+    MerchantSettings,
+    MessageDeliveryRecord,
+    Notification,
     Policy,
+    ProcessedWebhookEvent,
     RecoveryCase,
     Transaction,
 )
@@ -14,7 +35,11 @@ from app.repositories.interfaces import (
     ActionRecordRepository,
     AuditRecordRepository,
     CustomerRepository,
+    MerchantRepository,
+    MessageDeliveryRepository,
+    NotificationRepository,
     PolicyRepository,
+    ProcessedWebhookEventRepository,
     RecoveryCaseRepository,
     TransactionRepository,
 )
@@ -37,19 +62,18 @@ class SupabaseClient:
         }
 
     def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
-        try:
-            with httpx.Client(timeout=10.0) as client:
-                resp = client.get(
-                    f"{self.url}/rest/v1/{table}",
-                    params=params,
-                    headers=self._headers,
-                )
-                resp.raise_for_status()
-                return resp.json()
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code in (400, 404):
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(
+                f"{self.url}/rest/v1/{table}",
+                params=params,
+                headers=self._headers,
+            )
+            if resp.status_code == 404:
                 return []
-            raise
+            if resp.status_code in (401, 403):
+                raise SupabaseAccessError(table, resp.status_code, resp.text[:300])
+            resp.raise_for_status()
+            return resp.json()
 
     def insert(self, table: str, data: dict[str, Any]) -> dict[str, Any]:
         with httpx.Client(timeout=10.0) as client:
@@ -58,6 +82,8 @@ class SupabaseClient:
                 json=data,
                 headers=self._headers,
             )
+            if resp.status_code in (401, 403):
+                raise SupabaseAccessError(table, resp.status_code, resp.text[:300])
             resp.raise_for_status()
             result = resp.json()
             return result[0] if isinstance(result, list) and result else data
@@ -66,18 +92,19 @@ class SupabaseClient:
         headers = {**self._headers, "Prefer": f"resolution=merge-duplicates,return=representation"}
         with httpx.Client(timeout=10.0) as client:
             resp = client.post(
-                f"{self.url}/rest/v1/{table}",
-                params={"on_conflict": on_conflict},
+                f"{self.url}/rest/v1/{table}?on_conflict={on_conflict}",
                 json=data,
                 headers=headers,
             )
+            if resp.status_code in (401, 403):
+                raise SupabaseAccessError(table, resp.status_code, resp.text[:300])
             resp.raise_for_status()
             result = resp.json()
             return result[0] if isinstance(result, list) and result else data
 
 
 class SupabaseCustomerRepository(CustomerRepository):
-    DB_COLUMNS = {"id", "external_id", "name", "email", "phone", "opted_out", "created_at"}
+    DB_COLUMNS = {"id", "merchant_id", "external_id", "name", "email", "phone", "opted_out", "created_at"}
 
     def __init__(self, client: SupabaseClient) -> None:
         self.client = client
@@ -96,16 +123,22 @@ class SupabaseCustomerRepository(CustomerRepository):
         rows = self.client.select("customers", {"external_id": f"eq.{external_id}"})
         return Customer(**rows[0]) if rows else None
 
-    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> list[Customer]:
+    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0, include_unassigned: bool = False) -> list[Customer]:
         params = {"limit": str(limit), "offset": str(offset), "order": "created_at.desc"}
+        if merchant_id:
+            if include_unassigned:
+                params["or"] = f"(merchant_id.eq.{merchant_id},merchant_id.is.null)"
+            else:
+                params["merchant_id"] = f"eq.{merchant_id}"
         rows = self.client.select("customers", params)
         return [Customer(**r) for r in rows]
 
 
 class SupabaseTransactionRepository(TransactionRepository):
     DB_COLUMNS = {
-        "id", "customer_id", "amount", "currency", "payment_method",
-        "status", "failure_reason", "created_at", "updated_at"
+        "id", "merchant_id", "customer_id", "amount", "currency", "payment_method",
+        "status", "failure_reason", "failure_code", "razorpay_order_id", "razorpay_payment_id",
+        "created_at", "updated_at"
     }
 
     def __init__(self, client: SupabaseClient) -> None:
@@ -114,6 +147,22 @@ class SupabaseTransactionRepository(TransactionRepository):
     def save(self, transaction: Transaction) -> Transaction:
         data = transaction.model_dump(mode="json")
         db_data = {k: v for k, v in data.items() if k in self.DB_COLUMNS}
+        
+        # Convert enum values to strings for database compatibility
+        if "status" in db_data and hasattr(db_data["status"], "value"):
+            db_data["status"] = db_data["status"].value
+        if "currency" in db_data and hasattr(db_data["currency"], "value"):
+            db_data["currency"] = db_data["currency"].value
+        if "payment_method" in db_data and hasattr(db_data["payment_method"], "value"):
+            db_data["payment_method"] = db_data["payment_method"].value
+        
+        # Ensure merchant_id is provided (use default if None)
+        if "merchant_id" in db_data and db_data["merchant_id"] is None:
+            db_data["merchant_id"] = "merchant_default"
+            
+        # Remove any fields that are None to avoid constraint issues
+        db_data = {k: v for k, v in db_data.items() if v is not None}
+            
         res = self.client.upsert("transactions", db_data)
         return transaction.model_copy(update={k: res[k] for k in res if hasattr(transaction, k)})
 
@@ -121,8 +170,20 @@ class SupabaseTransactionRepository(TransactionRepository):
         rows = self.client.select("transactions", {"id": f"eq.{transaction_id}"})
         return Transaction(**rows[0]) if rows else None
 
-    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> list[Transaction]:
+    def delete(self, transaction_id: str) -> bool:
+        try:
+            self.client.delete("transactions", {"id": f"eq.{transaction_id}"})
+            return True
+        except Exception:
+            return False
+
+    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0, include_unassigned: bool = False) -> list[Transaction]:
         params = {"limit": str(limit), "offset": str(offset), "order": "created_at.desc"}
+        if merchant_id:
+            if include_unassigned:
+                params["or"] = f"(merchant_id.eq.{merchant_id},merchant_id.is.null)"
+            else:
+                params["merchant_id"] = f"eq.{merchant_id}"
         rows = self.client.select("transactions", params)
         return [Transaction(**r) for r in rows]
 
@@ -169,7 +230,7 @@ class SupabaseTransactionRepository(TransactionRepository):
 class SupabaseRecoveryCaseRepository(RecoveryCaseRepository):
     # Schema columns supported by Supabase recovery_cases table
     DB_COLUMNS = {
-        "id", "transaction_id", "customer_id", "amount_at_risk", "reason",
+        "id", "merchant_id", "transaction_id", "customer_id", "amount_at_risk", "reason",
         "status", "recovery_probability", "selected_action", "decision",
         "stop_reason", "escalate_reason", "outcome", "amount_recovered",
         "retry_count", "message_count", "created_at", "updated_at"
@@ -201,21 +262,17 @@ class SupabaseRecoveryCaseRepository(RecoveryCaseRepository):
         status: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        include_unassigned: bool = False,
     ) -> list[RecoveryCase]:
         params = {"limit": str(limit), "offset": str(offset), "order": "created_at.desc"}
         if status:
             params["status"] = f"eq.{status}"
-        rows = self.client.select("recovery_cases", params)
         if merchant_id:
-            # If default/demo merchant or all legacy rows, include cases with None or default merchant
-            # For newly registered distinct merchants, match strictly on their merchant_id
-            rows_for_merchant = [r for r in rows if r.get("merchant_id") == merchant_id]
-            if rows_for_merchant:
-                return [RecoveryCase(**r) for r in rows_for_merchant]
-            # Fallback for the default demo account
-            if merchant_id in ("default", "merchant_default", "admin") or len(rows) > 0 and merchant_id.startswith("merchant_"):
-                return [RecoveryCase(**r) for r in rows if r.get("merchant_id") in (None, "default", "merchant_default", merchant_id)]
-            return []
+            if include_unassigned:
+                params["or"] = f"(merchant_id.eq.{merchant_id},merchant_id.is.null)"
+            else:
+                params["merchant_id"] = f"eq.{merchant_id}"
+        rows = self.client.select("recovery_cases", params)
         return [RecoveryCase(**r) for r in rows]
 
 
@@ -260,8 +317,9 @@ class SupabaseAuditRecordRepository(AuditRecordRepository):
         res = self.client.insert("audit_records", data)
         return AuditRecord(**res)
 
-    def list_by_case(self, case_id: str) -> list[AuditRecord]:
-        rows = self.client.select("audit_records", {"recovery_case_id": f"eq.{case_id}", "order": "created_at.asc"})
+    def list_by_case(self, case_id: str, limit: int = 50) -> list[AuditRecord]:
+        # Optimized: Add limit to prevent excessive data retrieval
+        rows = self.client.select("audit_records", {"recovery_case_id": f"eq.{case_id}", "order": "created_at.asc", "limit": str(limit)})
         return [AuditRecord(**r) for r in rows]
 
 

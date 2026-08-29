@@ -6,6 +6,7 @@ from app.config import Settings, settings
 from app.services.messaging.email_provider import EmailDeliveryProvider
 from app.services.messaging.interfaces import DeliveryProviderAdapter
 from app.services.messaging.mock import MockDeliveryProvider
+from app.services.messaging.resend_provider import ResendDeliveryProvider
 from app.services.messaging.whatsapp_provider import WhatsAppDeliveryProvider
 
 
@@ -14,14 +15,20 @@ def get_delivery_provider(app_settings: Optional[Settings] = None) -> DeliveryPr
     Factory function returning the configured messaging delivery provider.
     Priority / fallback:
       1. 'mock' -> MockDeliveryProvider (default, zero-cost, offline-safe)
-      2. 'smtp' / 'email' -> EmailDeliveryProvider
-      3. 'whatsapp' -> WhatsAppDeliveryProvider
-      4. fallback -> MockDeliveryProvider
+      2. 'resend' -> ResendDeliveryProvider
+      3. 'smtp' / 'email' -> EmailDeliveryProvider
+      4. 'whatsapp' -> WhatsAppDeliveryProvider
+      5. fallback -> MockDeliveryProvider
     """
     cfg = app_settings or settings
     provider_name = (cfg.message_delivery_provider or "mock").lower()
 
-    if provider_name in ("smtp", "email"):
+    if provider_name == "resend":
+        return ResendDeliveryProvider(
+            api_key=cfg.resend_api_key,
+            from_email=cfg.resend_from_email,
+        )
+    elif provider_name in ("smtp", "email"):
         return EmailDeliveryProvider(
             host=cfg.smtp_host,
             port=cfg.smtp_port,

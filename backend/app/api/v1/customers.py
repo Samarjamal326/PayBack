@@ -13,7 +13,6 @@ from app.api.schemas import (
 from app.core.auth import get_current_merchant
 from app.models.domain import Merchant, RecoveryOutcome, RecoveryStatus, TransactionStatus
 from app.repositories.factory import get_repository_bundle
-
 router = APIRouter(prefix="/customers", tags=["customers"])
 _repos = get_repository_bundle()
 
@@ -40,8 +39,7 @@ def get_customer_detail(
             detail=f"Customer '{customer_id}' not found.",
         )
 
-    # Scoping check
-    if customer.merchant_id and customer.merchant_id != merchant.id:
+    if customer.merchant_id != merchant.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied: customer belongs to another merchant.",
@@ -96,7 +94,7 @@ def get_customer_payments(
     customer = _repos.customers.get(customer_id)
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Customer '{customer_id}' not found.")
-    if customer.merchant_id and customer.merchant_id != merchant.id:
+    if customer.merchant_id != merchant.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
     transactions = _repos.transactions.list_by_customer(customer_id)
@@ -111,7 +109,7 @@ def get_customer_recoveries(
     customer = _repos.customers.get(customer_id)
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Customer '{customer_id}' not found.")
-    if customer.merchant_id and customer.merchant_id != merchant.id:
+    if customer.merchant_id != merchant.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
     cases = _repos.cases.list_by_customer(customer_id)

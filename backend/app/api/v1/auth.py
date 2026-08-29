@@ -3,12 +3,18 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.schemas import AuthResponse, LoginRequest, MerchantProfileResponse, RegisterRequest
-from app.core.auth import get_auth_provider, get_current_merchant
-from app.models.domain import Merchant
+from app.core.auth import DEV_MERCHANT_ID, get_auth_provider, get_current_merchant
+from app.models.domain import Merchant, MerchantSettings
 from app.repositories.factory import get_repository_bundle
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 _repos = get_repository_bundle()
+
+
+def _ensure_merchant_settings(merchant_id: str) -> None:
+    settings_obj = _repos.merchants.get_settings(merchant_id)
+    if not settings_obj.id or settings_obj.merchant_id != merchant_id:
+        _repos.merchants.save_settings(MerchantSettings(merchant_id=merchant_id))
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
@@ -26,6 +32,7 @@ def register_merchant(payload: RegisterRequest) -> AuthResponse:
         phone=payload.phone,
     )
     saved = _repos.merchants.save(merchant)
+    _ensure_merchant_settings(saved.id)
 
     provider = get_auth_provider()
     token = provider.create_access_token(
@@ -45,12 +52,12 @@ def register_merchant(payload: RegisterRequest) -> AuthResponse:
 def login_merchant(payload: LoginRequest) -> AuthResponse:
     merchant = _repos.merchants.get_by_email(payload.email)
     if not merchant:
-        # Create merchant if not existing in dev mode
-        merchant = Merchant(
-            name=payload.email.split("@")[0].capitalize(),
-            email=payload.email,
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unknown merchant email. Please register first.",
         )
-        merchant = _repos.merchants.save(merchant)
+
+    _ensure_merchant_settings(merchant.id)
 
     provider = get_auth_provider()
     token = provider.create_access_token(

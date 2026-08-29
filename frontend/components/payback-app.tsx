@@ -58,6 +58,8 @@ import * as authService from '@/lib/api/auth'
 import * as dashboardService from '@/lib/api/dashboard'
 import * as recoveriesService from '@/lib/api/recoveries'
 import * as customersService from '@/lib/api/customers'
+import * as paymentsService from '@/lib/api/payments'
+import type { CreatePaymentWithCustomerRequest, CreatePaymentResponse } from '@/lib/api/payments'
 import * as policiesService from '@/lib/api/policies'
 import * as settingsService from '@/lib/api/settings'
 import * as notifService from '@/lib/api/notifications'
@@ -221,6 +223,7 @@ function Header({
   notifs,
   onMarkRead,
   onMarkAllRead,
+  onNewPayment,
 }: {
   onMenu: () => void
   dark: boolean
@@ -230,6 +233,7 @@ function Header({
   notifs: Notification[]
   onMarkRead: (id: string) => void
   onMarkAllRead: () => void
+  onNewPayment: () => void
 }) {
   const [showNotifs, setShowNotifs] = useState(false)
   const unreadCount = notifs.filter((n) => !n.read).length
@@ -256,6 +260,10 @@ function Header({
         </div>
       </div>
       <div className="top-actions">
+        <button className="button-primary button-sm" onClick={onNewPayment}>
+          <CreditCard className="size-4" />
+          Create Payment
+        </button>
         <button className="icon-btn" onClick={() => setDark(!dark)} aria-label="Toggle theme" title={dark ? 'Light mode' : 'Dark mode'}>
           {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
         </button>
@@ -360,24 +368,10 @@ function MiniChart({ trends }: { trends?: DashboardTrends | null }) {
   }
 
   return (
-    <div className="chart-wrap">
-      <div className="chart-y">
-        <span>₹2.0L</span>
-        <span>₹1.5L</span>
-        <span>₹1.0L</span>
-        <span>₹0.5L</span>
-        <span>₹0</span>
-      </div>
-      <div className="chart-grid">
-        {chartData.map((v, i) => (
-          <div key={i} className="chart-bar" style={{ height: `${v}%` }} />
-        ))}
-      </div>
-      <div className="chart-x">
-        <span>Aug 01</span>
-        <span>Aug 08</span>
-        <span>Aug 15</span>
-        <span>Aug 26</span>
+    <div className="chart-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '140px', color: 'var(--muted-foreground)' }}>
+      <div style={{ textAlign: 'center' }}>
+        <p style={{ fontSize: '13px', fontWeight: 500 }}>No recovery activity recorded yet</p>
+        <span style={{ fontSize: '11px', opacity: 0.7 }}>Trends will populate automatically as failed payments are recovered</span>
       </div>
     </div>
   )
@@ -539,8 +533,8 @@ function NewRecoveryDialog({
       <div className="dialog-content" onClick={(e) => e.stopPropagation()}>
         <div className="dialog-header">
           <div>
-            <h2>New Recovery Case</h2>
-            <p>Initiate automated revenue recovery for a failed transaction.</p>
+            <h2>New Recovery Case (Testing)</h2>
+            <p>⚠️ This is a testing tool for manually creating recovery cases. For real payments, use the "Create Payment" feature.</p>
           </div>
           <button className="icon-btn" onClick={onClose} aria-label="Close dialog">
             <X className="size-4" />
@@ -584,10 +578,313 @@ function NewRecoveryDialog({
               Cancel
             </button>
             <button type="submit" className="button-primary">
-              Create Recovery
+              Create Recovery (Test)
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+function NewPaymentDialog({
+  open,
+  onClose,
+  onCreate,
+}: {
+  open: boolean
+  onClose: () => void
+  onCreate: (customerData: any) => Promise<void>
+}) {
+  const [customerName, setCustomerName] = useState('')
+  const [customerEmail, setCustomerEmail] = useState('')
+  const [customerPhone, setCustomerPhone] = useState('')
+  const [amount, setAmount] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('card')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [paymentLink, setPaymentLink] = useState('')
+  const [paymentCreated, setPaymentCreated] = useState(false)
+  const [paymentStatus, setPaymentStatus] = useState('')
+  const [transactionId, setTransactionId] = useState('')
+
+  if (!open) return null
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setError('')
+    
+    if (!customerName.trim()) {
+      setError('Please enter customer name')
+      return
+    }
+    
+    if (!customerEmail.trim()) {
+      setError('Please enter customer email')
+      return
+    }
+    
+    if (!customerPhone.trim()) {
+      setError('Please enter customer phone')
+      return
+    }
+    
+    const amountValue = Number(amount)
+    if (!amountValue || amountValue <= 0) {
+      setError('Please enter a valid amount')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const result = await onCreate({
+        customer_name: customerName,
+        customer_email: customerEmail,
+        customer_phone: customerPhone,
+        amount: amountValue,
+        currency: 'INR',
+        payment_method: paymentMethod
+      })
+      
+      setPaymentLink(result.payment_link_url || '')
+      setTransactionId(result.transaction_id || '')
+      setPaymentStatus('pending')
+      setPaymentCreated(true)
+      
+      // Start polling for payment status
+      pollPaymentStatus(result.transaction_id || '')
+      
+      // Reset form for next payment
+      setCustomerName('')
+      setCustomerEmail('')
+      setCustomerPhone('')
+      setAmount('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create payment')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleReset() {
+    setPaymentCreated(false)
+    setPaymentLink('')
+    setTransactionId('')
+    setPaymentStatus('')
+    setCustomerName('')
+    setCustomerEmail('')
+    setCustomerPhone('')
+    setAmount('')
+    setError('')
+  }
+
+  async function pollPaymentStatus(txId: string) {
+    try {
+      // Get auth headers
+      const session = localStorage.getItem('payback-auth-session')
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      }
+      
+      if (session) {
+        try {
+          const parsed = JSON.parse(session)
+          if (parsed.accessToken) {
+            headers['Authorization'] = `Bearer ${parsed.accessToken}`
+          }
+        } catch (e) {
+          console.error('Failed to parse auth session:', e)
+        }
+      }
+      
+      const response = await fetch(`http://localhost:8000/api/v1/payments/transaction/${txId}`, {
+        headers
+      })
+      
+      if (response.ok) {
+        const transaction = await response.json()
+        setPaymentStatus(transaction.status)
+        
+        // Continue polling if payment is still pending
+        if (transaction.status === 'pending') {
+          setTimeout(() => pollPaymentStatus(txId), 3000) // Poll every 3 seconds
+        }
+      }
+    } catch (error) {
+      console.error('Failed to poll payment status:', error)
+    }
+  }
+
+  return (
+    <div className="dialog-overlay" onClick={onClose}>
+      <div className="dialog-content" onClick={(e) => e.stopPropagation()}>
+        <div className="dialog-header">
+          <div>
+            <h2>{paymentCreated ? 'Payment Link Created' : 'Create Payment'}</h2>
+            <p>{paymentCreated 
+              ? 'Payment link created successfully. Use it to test the payment flow.'
+              : 'Create a Razorpay Test Mode payment link for a new customer.'}
+            </p>
+          </div>
+          <button className="icon-btn" onClick={onClose} aria-label="Close dialog">
+            <X className="size-4" />
+          </button>
+        </div>
+        
+        {paymentCreated ? (
+          <div className="dialog-form">
+            <div className="payment-link-display">
+              <p className="text-sm font-medium mb-3">Payment Link Created Successfully!</p>
+              
+              {/* Payment Status Indicator */}
+              <div className="mb-4 p-3 rounded-md" style={{
+                background: paymentStatus === 'completed' || paymentStatus === 'success' 
+                  ? '#dcfce7' 
+                  : paymentStatus === 'failed' 
+                    ? '#fee2e2' 
+                    : '#f1f5f9',
+                border: paymentStatus === 'completed' || paymentStatus === 'success' 
+                  ? '1px solid #22c55e' 
+                  : paymentStatus === 'failed' 
+                    ? '1px solid #ef4444' 
+                    : '1px solid #e2e8f0'
+              }}>
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${
+                    paymentStatus === 'completed' || paymentStatus === 'success' 
+                      ? 'bg-green-500' 
+                      : paymentStatus === 'failed' 
+                        ? 'bg-red-500' 
+                        : 'bg-yellow-500 animate-pulse'
+                  }`}></div>
+                  <span className="text-sm font-medium">
+                    Status: {paymentStatus ? paymentStatus.charAt(0).toUpperCase() + paymentStatus.slice(1) : 'Pending'}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="payment-link-box">
+                <input 
+                  value={paymentLink} 
+                  readOnly 
+                  className="payment-link-input" 
+                  style={{ 
+                    flex: 1, 
+                    padding: '8px 12px', 
+                    border: '1px solid var(--border)', 
+                    borderRadius: '6px',
+                    background: 'var(--muted)',
+                    fontSize: '13px'
+                  }} 
+                />
+                <button 
+                  onClick={() => navigator.clipboard.writeText(paymentLink)} 
+                  className="button-secondary"
+                  style={{ marginLeft: '8px' }}
+                >
+                  Copy Link
+                </button>
+                <button 
+                  onClick={() => window.open(paymentLink, '_blank')} 
+                  className="button-primary"
+                  style={{ marginLeft: '8px' }}
+                >
+                  Open Link
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-3" style={{ lineHeight: '1.4' }}>
+                <strong>Testing Instructions:</strong><br/>
+                1. Click "Open Link" to make a test payment<br/>
+                2. You can intentionally fail the payment to test the recovery process<br/>
+                3. If payment succeeds, no recovery action will be taken<br/>
+                4. If payment fails, the system will automatically start the recovery process
+              </p>
+            </div>
+            <div className="dialog-actions">
+              <button type="button" className="button-ghost" onClick={handleReset}>
+                Create Another Payment
+              </button>
+              <button type="button" className="button-primary" onClick={onClose}>
+                Done
+              </button>
+            </div>
+          </div>
+        ) : (
+          <form className="dialog-form" onSubmit={handleSubmit}>
+            {error && (
+              <div className="alert alert-error" role="alert">
+                {error}
+              </div>
+            )}
+            <label>
+              Customer Name
+              <input 
+                name="customerName" 
+                required 
+                placeholder="e.g. Rahul Sharma" 
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+              />
+            </label>
+            <label>
+              Customer Email
+              <input 
+                name="customerEmail" 
+                required 
+                type="email" 
+                placeholder="rahul@example.com"
+                value={customerEmail}
+                onChange={(e) => setCustomerEmail(e.target.value)}
+              />
+            </label>
+            <label>
+              Customer Phone
+              <input 
+                name="customerPhone" 
+                required 
+                type="tel" 
+                placeholder="9876543210"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+              />
+            </label>
+            <div className="row">
+              <label>
+                Amount (₹ INR)
+                <input 
+                  name="amount" 
+                  required 
+                  type="number" 
+                  min="1" 
+                  step="1" 
+                  placeholder="2499"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
+              </label>
+              <label>
+                Payment Method
+                <select 
+                  name="paymentMethod" 
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                >
+                  <option value="card">Card</option>
+                  <option value="upi">UPI</option>
+                  <option value="net_banking">Netbanking</option>
+                </select>
+              </label>
+            </div>
+            <div className="dialog-actions">
+              <button type="button" className="button-ghost" onClick={onClose} disabled={loading}>
+                Cancel
+              </button>
+              <button type="submit" className="button-primary" disabled={loading}>
+                {loading ? 'Creating...' : 'Create Payment Link'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   )
@@ -854,7 +1151,7 @@ function SettingsDialog({
   )
 }
 
-function Dashboard({ onNewRecovery, user }: { onNewRecovery: () => void; user?: { name: string; email: string } | null }) {
+function Dashboard({ user }: { user?: { name: string; email: string } | null }) {
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [trends, setTrends] = useState<DashboardTrends | null>(null)
   const [breakdown, setBreakdown] = useState<DashboardBreakdown | null>(null)
@@ -867,12 +1164,13 @@ function Dashboard({ onNewRecovery, user }: { onNewRecovery: () => void; user?: 
     let mounted = true
     async function load() {
       try {
+        // Optimized: Reduce customer data fetch - only get minimal data needed for dashboard
         const [sum, tr, bdown, recs, custs] = await Promise.all([
           dashboardService.getDashboardSummary(),
           dashboardService.getDashboardTrends(),
           dashboardService.getDashboardBreakdown(),
           recoveriesService.listRecoveries({ limit: 5 }),
-          customersService.listCustomers(),
+          customersService.listCustomers({ limit: 20 }), // Reduced from default 100 to 20
         ])
         if (!mounted) return
         setSummary(sum)
@@ -924,12 +1222,6 @@ function Dashboard({ onNewRecovery, user }: { onNewRecovery: () => void; user?: 
       <PageIntro
         title="Overview"
         subtitle={`Welcome back, ${firstName}. Here is your recovery performance.`}
-        action={
-          <button className="button-primary" onClick={onNewRecovery}>
-            <Sparkles className="size-4" />
-            New recovery
-          </button>
-        }
       />
       <div className="metric-grid">
         <Metric label="Recovered this month" value={formatINR(recoveredVal)} change="Live" note="Real-time recovery total" />
@@ -1004,6 +1296,36 @@ function Dashboard({ onNewRecovery, user }: { onNewRecovery: () => void; user?: 
         </div>
       </div>
       <RecoveryTable recoveriesList={recentRecs} compact />
+      
+      {/* Recent Payment Links Section */}
+      <div className="panel" style={{ marginTop: '24px' }}>
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">Testing</p>
+            <h2>Payment Link Testing</h2>
+          </div>
+        </div>
+        <div style={{ padding: '16px' }}>
+          <p className="text-sm text-muted-foreground mb-4">
+            Use the "Create Payment" button above to generate test payment links. Click the generated links to make test payments and observe the recovery process.
+          </p>
+          <div style={{ 
+            padding: '12px', 
+            background: 'var(--muted)', 
+            borderRadius: '8px',
+            border: '1px solid var(--border)'
+          }}>
+            <p className="text-sm font-medium mb-2">Testing Workflow:</p>
+            <ol className="text-sm text-muted-foreground" style={{ paddingLeft: '20px', margin: 0 }}>
+              <li style={{ marginBottom: '8px' }}>Click "Create Payment" and enter customer details</li>
+              <li style={{ marginBottom: '8px' }}>Copy or open the generated payment link</li>
+              <li style={{ marginBottom: '8px' }}>Make a test payment (succeed or fail intentionally)</li>
+              <li style={{ marginBottom: '8px' }}>Watch the recovery process in the "Recoveries" tab</li>
+              <li>Success: No recovery action • Failure: Automatic recovery triggers</li>
+            </ol>
+          </div>
+        </div>
+      </div>
     </>
   )
 }
@@ -1055,17 +1377,16 @@ function Detail({ id }: { id: string }) {
   const [timeline, setTimeline] = useState<AuditRecord[]>([])
   const [customer, setCustomer] = useState<ApiCustomer | null>(null)
   const [customerMetrics, setCustomerMetrics] = useState<{ totalPaidAmount: number; recoveryCasesCount: number } | null>(null)
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null)
-  const [actionLoading, setActionLoading] = useState(false)
   const fallback = getRecovery(id)
 
   useEffect(() => {
     let mounted = true
     async function load() {
       try {
+        // Optimized: Limit timeline records for better performance
         const [c, tl] = await Promise.all([
           recoveriesService.getRecovery(id),
-          recoveriesService.getRecoveryTimeline(id),
+          recoveriesService.getRecoveryTimeline(id, 20), // Limit to 20 most recent events
         ])
         if (!mounted) return
         setCaseData(c)
@@ -1093,23 +1414,6 @@ function Detail({ id }: { id: string }) {
     return () => { mounted = false }
   }, [id])
 
-
-  async function handleSendReminder() {
-    setActionLoading(true)
-    setActionSuccess(null)
-    try {
-      if (caseData) {
-        await recoveriesService.startRecovery({ case_id: caseData.id })
-      }
-      setActionSuccess('Reminder dispatched successfully via configured channel.')
-      const tl = await recoveriesService.getRecoveryTimeline(id)
-      setTimeline(tl)
-    } catch (err) {
-      setActionSuccess('Action simulated: Reminder sent to customer.')
-    } finally {
-      setActionLoading(false)
-    }
-  }
 
   const prob = caseData ? Math.round(caseData.recoveryProbability * 100) : fallback.probability
   const amount = caseData ? caseData.amountAtRisk : fallback.amount
@@ -1192,22 +1496,6 @@ function Detail({ id }: { id: string }) {
                     'The payment attempt was declined, but the customer has a strong history of successful payments. A low-friction reminder is the best next step.'}
                 </p>
               </div>
-            </div>
-
-            {actionSuccess && (
-              <div style={{ marginTop: '14px', padding: '10px 14px', borderRadius: '8px', background: 'var(--status-good-bg)', color: 'var(--status-good-text)', fontSize: '12px' }}>
-                {actionSuccess}
-              </div>
-            )}
-
-            <div className="action-row">
-              <button className="button-primary" onClick={handleSendReminder} disabled={actionLoading}>
-                <Sparkles className="size-4" />
-                {actionLoading ? 'Dispatching…' : 'Send reminder'}
-              </button>
-              <button className="button-secondary" onClick={() => setActionSuccess('Case marked resolved.')}>
-                Mark as resolved
-              </button>
             </div>
           </div>
           <div className="panel">
@@ -1382,7 +1670,7 @@ function Analytics() {
               </div>
             </div>
           ) : (
-            <MiniChart />
+            <MiniChart trends={null} />
           )}
         </div>
         <div className="panel breakdown">
@@ -1445,14 +1733,23 @@ function Analytics() {
 
 function Customers() {
   const [customerList, setCustomerList] = useState<Customer[]>([])
+  const [recentFailures, setRecentFailures] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let mounted = true
     async function load() {
       try {
-        const apiCusts = await customersService.listCustomers()
+        const [apiCusts, recoveries] = await Promise.all([
+          customersService.listCustomers(),
+          recoveriesService.listRecoveries({ limit: 10 })
+        ])
         if (!mounted) return
+        
+        // Filter recent failed payments
+        const failedPayments = recoveries.filter(r => r.status === 'detected' || r.status === 'failed' || r.status === 'in_review')
+        setRecentFailures(failedPayments)
+        
         if (apiCusts.length > 0) {
           // Fetch detail (with metrics) for each customer in parallel
           const details = await Promise.allSettled(
@@ -1489,7 +1786,10 @@ function Customers() {
 
   return (
     <>
-      <PageIntro title="Customers" subtitle="A clear view of customers with payment activity." />
+      <PageIntro 
+        title="Customers" 
+        subtitle="A clear view of customers with payment activity." 
+      />
       <div className="table-card">
         <div className="table-heading">
           <div className="search">
@@ -1534,19 +1834,67 @@ function Customers() {
           </table>
         </div>
       </div>
+      
+      {/* Recent Payment Failures Section */}
+      {recentFailures.length > 0 && (
+        <div className="panel" style={{ marginTop: '24px' }}>
+          <div className="panel-heading">
+            <div>
+              <p className="section-kicker">Alerts</p>
+              <h2>Recent Payment Failures</h2>
+            </div>
+            <span className="status status-bad">{recentFailures.length} Failed</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentFailures.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <Link href={`/recoveries/${r.id}`} className="customer-link">
+                        <b>{r.customerId.replace('cus_', '').replace(/_/g, ' ')}</b>
+                        <small>{r.customerId}</small>
+                      </Link>
+                    </td>
+                    <td>{formatINR(r.amountAtRisk)}</td>
+                    <td>
+                      <span className="status status-bad">Failed</span>
+                    </td>
+                    <td className="text-muted-foreground">{r.reason}</td>
+                    <td className="text-muted-foreground">
+                      {new Date(r.createdAt).toLocaleDateString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </>
   )
 }
 
 function CustomerDetail({ id }: { id: string }) {
   const [detail, setDetail] = useState<ApiCustomerDetail | null>(null)
+  const [loading, setLoading] = useState(true)
   const fallback = getCustomer(id)
-  const fallbackPayments = getCustomerPayments(fallback.id)
-  const fallbackRecoveries = getCustomerRecoveries(fallback.id)
-  const fallbackEvents = getCustomerTimeline(fallback.id)
+  const fallbackPayments = fallback ? getCustomerPayments(fallback.id) : []
+  const fallbackRecoveries = fallback ? getCustomerRecoveries(fallback.id) : []
+  const fallbackEvents = fallback ? getCustomerTimeline(fallback.id) : []
 
   useEffect(() => {
     let mounted = true
+    setLoading(true)
     async function load() {
       try {
         const d = await customersService.getCustomerDetail(id)
@@ -1554,17 +1902,19 @@ function CustomerDetail({ id }: { id: string }) {
         setDetail(d)
       } catch (err) {
         console.error('Failed to load customer detail:', err)
+      } finally {
+        if (mounted) setLoading(false)
       }
     }
     load()
     return () => { mounted = false }
   }, [id])
 
-  const name = detail ? detail.customer.name : fallback.name
-  const email = detail ? detail.customer.email || `${id}@example.com` : fallback.email
-  const lifetime = detail ? detail.metrics.totalPaidAmount : fallback.lifetime
-  const recoveryRate = detail ? Math.round(detail.metrics.recoveryRate * 100) : fallback.recoveryRate
-  const openCases = detail ? detail.metrics.recoveryCasesCount : fallback.cases
+  const name = detail ? detail.customer.name : (fallback?.name || 'Loading...')
+  const email = detail ? detail.customer.email || `${id}@example.com` : (fallback?.email || 'Loading...')
+  const lifetime = detail ? detail.metrics.totalPaidAmount : (fallback?.lifetime || 0)
+  const recoveryRate = detail ? Math.round(detail.metrics.recoveryRate * 100) : (fallback?.recoveryRate || 0)
+  const openCases = detail ? detail.metrics.recoveryCasesCount : (fallback?.cases || 0)
 
   const txList = detail && detail.recentTransactions.length > 0
     ? detail.recentTransactions.map((t) => ({
@@ -1592,14 +1942,14 @@ function CustomerDetail({ id }: { id: string }) {
       </Link>
       <PageIntro
         title={name}
-        subtitle={`${fallback.company} · Customer since ${fallback.joined}`}
+        subtitle={fallback ? `${fallback.company} · Customer since ${fallback.joined}` : 'Loading customer details...'}
         action={<button className="button-secondary">Edit profile</button>}
       />
       <div className="metric-grid">
-        <Metric label="Lifetime value" value={formatINR(lifetime)} change="12.4%" note={`${fallback.segment} segment`} />
+        <Metric label="Lifetime value" value={formatINR(lifetime)} change="12.4%" note={fallback ? `${fallback.segment} segment` : 'Loading...'} />
         <Metric label="Recovery rate" value={`${recoveryRate}%`} change="8.2%" note="Customer success score" />
         <Metric label="Open recoveries" value={openCases.toString()} change="1" note="Needs attention" positive={false} />
-        <Metric label="Last payment" value={fallback.lastPayment} change="On time" note="Payment activity" />
+        <Metric label="Last payment" value={fallback?.lastPayment || 'Loading...'} change="On time" note="Payment activity" />
       </div>
       <div className="dashboard-grid">
         <div className="panel">
@@ -1621,21 +1971,31 @@ function CustomerDetail({ id }: { id: string }) {
                 </tr>
               </thead>
               <tbody>
-                {txList.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <b>{p.id}</b>
-                    </td>
-                    <td>{formatINR(p.amount)}</td>
-                    <td className="text-muted-foreground">{p.method}</td>
-                    <td>
-                      <span className={`status ${p.status === 'Succeeded' ? 'status-good' : 'status-warn'}`}>
-                        {p.status}
-                      </span>
-                    </td>
-                    <td className="text-muted-foreground">{p.date}</td>
+                {loading ? (
+                  <tr>
+                    <td colSpan={5} className="text-center text-muted-foreground">Loading payments...</td>
                   </tr>
-                ))}
+                ) : txList.length > 0 ? (
+                  txList.map((p) => (
+                    <tr key={p.id}>
+                      <td>
+                        <b>{p.id}</b>
+                      </td>
+                      <td>{formatINR(p.amount)}</td>
+                      <td className="text-muted-foreground">{p.method}</td>
+                      <td>
+                        <span className={`status ${p.status === 'Succeeded' ? 'status-good' : 'status-warn'}`}>
+                          {p.status}
+                        </span>
+                      </td>
+                      <td className="text-muted-foreground">{p.date}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="text-center text-muted-foreground">No payments found</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -1648,17 +2008,23 @@ function CustomerDetail({ id }: { id: string }) {
             </div>
           </div>
           <div className="timeline">
-            {fallbackEvents.map((e, i) => (
-              <div key={`${e.label}-${i}`}>
-                <span className={`timeline-dot ${e.kind === 'success' ? 'done' : 'current'}`} />
-                <div>
-                  <b>{e.label}</b>
-                  <p>
-                    {e.date} · {e.detail}
-                  </p>
+            {loading ? (
+              <p className="text-muted-foreground">Loading timeline...</p>
+            ) : fallbackEvents.length > 0 ? (
+              fallbackEvents.map((e, i) => (
+                <div key={`${e.label}-${i}`}>
+                  <span className={`timeline-dot ${e.kind === 'success' ? 'done' : 'current'}`} />
+                  <div>
+                    <b>{e.label}</b>
+                    <p>
+                      {e.date} · {e.detail}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="text-muted-foreground">No timeline events available</p>
+            )}
           </div>
         </div>
       </div>
@@ -1681,13 +2047,18 @@ function CustomerDetail({ id }: { id: string }) {
               </tr>
             </thead>
             <tbody>
-              {recList.map((r) => (
-                <tr key={r.id}>
-                  <td>
-                    <Link href={`/recoveries/${r.id}`} className="customer-link">
-                      <b>{r.id}</b>
-                    </Link>
-                  </td>
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="text-center text-muted-foreground">Loading recovery cases...</td>
+                </tr>
+              ) : recList.length > 0 ? (
+                recList.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <Link href={`/recoveries/${r.id}`} className="customer-link">
+                        <b>{r.id}</b>
+                      </Link>
+                    </td>
                   <td>{formatINR(r.amount)}</td>
                   <td>
                     <Status status={r.status} />
@@ -1699,7 +2070,12 @@ function CustomerDetail({ id }: { id: string }) {
                     </Link>
                   </td>
                 </tr>
-              ))}
+              ))
+            ) : (
+              <tr>
+                <td colSpan={5} className="text-center text-muted-foreground">No recovery cases found</td>
+              </tr>
+            )}
             </tbody>
           </table>
         </div>
@@ -1850,12 +2226,14 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
 
   // Local state abstractions with live service syncing
   const [recoveriesList, setRecoveriesList] = useState<Recovery[]>([])
+  const [customersList, setCustomersList] = useState<ApiCustomer[]>([])
   const [policiesList, setPoliciesList] = useState<Policy[]>(initialPolicies)
   const [notifsList, setNotifsList] = useState<Notification[]>(initialNotifications)
   const [settingsState, setSettingsState] = useState<WorkspaceSettings>(initialSettings)
 
   // Modals state
   const [recoveryModalOpen, setRecoveryModalOpen] = useState(false)
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [policyModalOpen, setPolicyModalOpen] = useState(false)
   const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null)
   const [settingsModalKind, setSettingsModalKind] = useState<'workspace' | 'notifications' | 'account' | null>(null)
@@ -1901,6 +2279,7 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
           custs.value.forEach((c) => {
             customerMap.set(c.id, { name: c.name, email: c.email || `${c.id}@example.com` })
           })
+          setCustomersList(custs.value)
         }
 
         if (pols.status === 'fulfilled' && pols.value.length > 0) {
@@ -1986,35 +2365,73 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
 
   async function handleCreateRecovery(rec: Omit<Recovery, 'id' | 'created' | 'probability' | 'nextAction'>) {
     try {
-      await recoveriesService.startRecovery({ case_id: `case_${Date.now()}` })
-      const updated = await recoveriesService.listRecoveries()
-      if (updated.length > 0) {
+      const createdCase = await recoveriesService.recordFailedPayment({
+        customer_name: rec.customer,
+        customer_email: rec.email,
+        transaction_amount: rec.amount,
+        payment_method: rec.payment,
+        failure_reason: rec.reason,
+      })
+
+      // Run recovery agent on the newly created case
+      try {
+        await recoveriesService.startRecovery({ case_id: createdCase.id })
+      } catch (err) {
+        console.warn('Auto start recovery notice:', err)
+      }
+
+      // Re-fetch all data to ensure dashboard and tables update live
+      const [updatedRecs, updatedCusts] = await Promise.all([
+        recoveriesService.listRecoveries(),
+        customersService.listCustomers(),
+      ])
+
+      const customerMap = new Map<string, { name: string; email: string }>()
+      updatedCusts.forEach((c) => {
+        customerMap.set(c.id, { name: c.name, email: c.email || `${c.id}@example.com` })
+      })
+
+      if (updatedRecs.length > 0) {
         setRecoveriesList(
-          updated.map((r) => ({
-            id: r.id,
-            customerId: r.customerId,
-            customer: r.customerId.replace('cus_', '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || 'Customer',
-            email: `${r.customerId}@example.com`,
-            amount: r.amountAtRisk,
-            status: r.status === 'recovered' ? 'Recovered' : r.status === 'in_review' ? 'In review' : 'Failed',
-            reason: r.reason,
-            created: 'Just now',
-            payment: 'UPI ·•• 4821',
-            probability: Math.round(r.recoveryProbability * 100),
-            nextAction: 'Send reminder',
-          }))
+          updatedRecs.map((r) => {
+            const custInfo = customerMap.get(r.customerId)
+            return {
+              id: r.id,
+              customerId: r.customerId,
+              customer: custInfo?.name || rec.customer,
+              email: custInfo?.email || rec.email,
+              amount: r.amountAtRisk,
+              status: r.status === 'recovered' ? 'Recovered' : r.status === 'in_review' ? 'In review' : 'Failed',
+              reason: r.reason,
+              created: 'Just now',
+              payment: rec.payment,
+              probability: Math.round(r.recoveryProbability * 100),
+              nextAction: r.selectedAction ? r.selectedAction.replace(/_/g, ' ') : 'Smart retry',
+            }
+          })
         )
       }
-    } catch {
-      // Optimistic local fallback
-      const newRec: Recovery = {
-        ...rec,
-        id: `RCV-${2049 + recoveriesList.length}`,
-        created: 'Just now',
-        probability: 78,
-        nextAction: 'Send reminder',
-      }
-      setRecoveriesList([newRec, ...recoveriesList])
+    } catch (err) {
+      console.error('Failed to create real recovery case:', err)
+      throw err
+    }
+  }
+
+  async function handleCreatePayment(customerData: CreatePaymentWithCustomerRequest): Promise<CreatePaymentResponse> {
+    try {
+      const paymentResult: CreatePaymentResponse = await paymentsService.createPaymentWithCustomer(customerData)
+
+      // Refresh customer data to show new customer
+      const updatedCusts = await customersService.listCustomers()
+      setCustomersList(updatedCusts)
+
+      // Show success message (in real app, this would be a toast)
+      console.log('Payment created successfully:', paymentResult)
+      
+      return paymentResult
+    } catch (err) {
+      console.error('Failed to create payment:', err)
+      throw err
     }
   }
 
@@ -2130,7 +2547,7 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
   } else if (view === 'settings') {
     content = <SettingsPage settings={settingsState} onOpenDialog={(kind) => setSettingsModalKind(kind)} />
   } else {
-    content = <Dashboard onNewRecovery={() => setRecoveryModalOpen(true)} user={currentUser} />
+    content = <Dashboard user={currentUser} />
   }
 
   return (
@@ -2153,6 +2570,7 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
           notifs={notifsList}
           onMarkRead={handleMarkNotifRead}
           onMarkAllRead={handleMarkAllNotifsRead}
+          onNewPayment={() => setPaymentModalOpen(true)}
         />
         <div className="content">{content}</div>
       </main>
@@ -2162,6 +2580,11 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
         open={recoveryModalOpen}
         onClose={() => setRecoveryModalOpen(false)}
         onCreate={handleCreateRecovery}
+      />
+      <NewPaymentDialog
+        open={paymentModalOpen}
+        onClose={() => setPaymentModalOpen(false)}
+        onCreate={handleCreatePayment}
       />
       <PolicyDialog
         open={policyModalOpen}
@@ -2262,8 +2685,8 @@ export function Landing() {
               <span className="mini-line short" />
             </div>
             <div className="preview-content">
-              <p className="section-kicker">Overview</p>
-              <h3>Good morning, Aditi</h3>
+              <p className="section-kicker">Live Dashboard</p>
+              <h3>Recovery Performance</h3>
               <div className="preview-metrics">
                 <div>
                   <small>Recovered</small>
@@ -2283,31 +2706,6 @@ export function Landing() {
               </div>
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* Feature capabilities grid */}
-      <section className="landing-features">
-        <div className="feature-card">
-          <div className="feature-icon">
-            <Activity className="size-5" />
-          </div>
-          <h3>Intelligent Retries</h3>
-          <p>Machine-learned recovery probability engine determines optimal retry timing per customer history and payment channel.</p>
-        </div>
-        <div className="feature-card">
-          <div className="feature-icon">
-            <Sparkles className="size-5" />
-          </div>
-          <h3>Gentle Multi-Channel Messaging</h3>
-          <p>Deliver personalized, low-friction recovery links through WhatsApp and Email without spamming or damaging loyalty.</p>
-        </div>
-        <div className="feature-card">
-          <div className="feature-icon">
-            <ShieldCheck className="size-5" />
-          </div>
-          <h3>Human-in-the-Loop Policies</h3>
-          <p>Customizable merchant guardrails with automatic escalation for high-value transactions and sensitive accounts.</p>
         </div>
       </section>
     </main>

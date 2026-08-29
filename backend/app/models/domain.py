@@ -217,6 +217,9 @@ class Transaction(BaseModel):
     payment_method: PaymentMethod = PaymentMethod.UNKNOWN
     status: TransactionStatus
     failure_reason: Optional[str] = None
+    failure_code: Optional[str] = None
+    razorpay_order_id: Optional[str] = None
+    razorpay_payment_id: Optional[str] = None
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
 

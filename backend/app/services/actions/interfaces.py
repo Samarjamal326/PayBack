@@ -12,6 +12,7 @@ class ActionResult:
     outcome: RecoveryOutcome
     detail: str
     external_ref: str | None = None  # e.g., Razorpay payment link URL / ID
+    external_id: str | None = None  # e.g., Razorpay order ID / payment ID
 
 
 class PaymentActionProvider(ABC):

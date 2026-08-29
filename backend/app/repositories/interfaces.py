@@ -55,7 +55,7 @@ class CustomerRepository(ABC):
         ...
 
     @abstractmethod
-    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> list[Customer]:
+    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0, include_unassigned: bool = False) -> list[Customer]:
         ...
 
 
@@ -69,7 +69,11 @@ class TransactionRepository(ABC):
         ...
 
     @abstractmethod
-    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> list[Transaction]:
+    def delete(self, transaction_id: str) -> bool:
+        ...
+
+    @abstractmethod
+    def list_by_merchant(self, merchant_id: Optional[str] = None, limit: int = 100, offset: int = 0, include_unassigned: bool = False) -> list[Transaction]:
         ...
 
     @abstractmethod
@@ -130,6 +134,7 @@ class RecoveryCaseRepository(ABC):
         status: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        include_unassigned: bool = False,
     ) -> list[RecoveryCase]:
         ...
 
@@ -165,7 +170,7 @@ class AuditRecordRepository(ABC):
         ...
 
     @abstractmethod
-    def list_by_case(self, case_id: str) -> list[AuditRecord]:
+    def list_by_case(self, case_id: str, limit: int = 50) -> list[AuditRecord]:
         ...
 
 

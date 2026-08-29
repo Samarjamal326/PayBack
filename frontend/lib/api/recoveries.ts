@@ -175,7 +175,7 @@ export async function getRecoveryActions(recoveryId: string): Promise<ActionReco
   }))
 }
 
-export async function getRecoveryTimeline(recoveryId: string): Promise<AuditRecord[]> {
+export async function getRecoveryTimeline(recoveryId: string, limit: number = 50): Promise<AuditRecord[]> {
   if (!isApiMode()) {
     return [
       {
@@ -202,6 +202,7 @@ export async function getRecoveryTimeline(recoveryId: string): Promise<AuditReco
     ]
   }
 
+  // Optimized: Add limit parameter for better performance
   const raw = await apiFetch<Array<{
     id: string
     merchant_id?: string
@@ -209,7 +210,7 @@ export async function getRecoveryTimeline(recoveryId: string): Promise<AuditReco
     event_type: string
     detail: string
     created_at: string
-  }>>(`/api/v1/recoveries/${recoveryId}/timeline`)
+  }>>(`/api/v1/recoveries/${recoveryId}/timeline?limit=${limit}`)
 
   return raw.map((t) => ({
     id: t.id,
@@ -349,3 +350,79 @@ export async function startRecovery(payload: StartRecoveryPayload): Promise<Reco
     updatedAt: r.updated_at,
   }
 }
+
+export async function recordFailedPayment(payload: {
+  customer_name: string
+  customer_email: string
+  transaction_amount: number
+  payment_method: string
+  failure_reason: string
+}): Promise<RecoveryCase> {
+  const methodMap: Record<string, string> = {
+    'UPI': 'upi',
+    'Visa Card': 'card',
+    'Mastercard': 'card',
+    'Netbanking': 'net_banking',
+  }
+
+  const raw = await apiFetch<{
+    id: string
+    merchant_id?: string
+    transaction_id: string
+    customer_id: string
+    amount_at_risk: number
+    reason: string
+    status: string
+    recoverability?: string
+    recovery_probability: number
+    expected_value: number
+    decision_reason?: string
+    decision?: string
+    selected_action?: string
+    stop_reason?: string
+    escalate_reason?: string
+    outcome?: string
+    amount_recovered: number
+    retry_count: number
+    message_count: number
+    created_at: string
+    updated_at: string
+  }>('/api/v1/events/payment', {
+    method: 'POST',
+    body: JSON.stringify({
+      customer_external_id: `cus_${payload.customer_name.toLowerCase().replace(/\s+/g, '_')}`,
+      customer_name: payload.customer_name,
+      customer_email: payload.customer_email,
+      transaction_amount: payload.transaction_amount,
+      transaction_currency: 'INR',
+      payment_method: methodMap[payload.payment_method] || 'upi',
+      transaction_status: 'failed',
+      failure_reason: payload.failure_reason,
+    }),
+  })
+
+  return {
+    id: raw.id,
+    merchantId: raw.merchant_id,
+    transactionId: raw.transaction_id,
+    customerId: raw.customer_id,
+    amountAtRisk: raw.amount_at_risk,
+    reason: raw.reason,
+    status: raw.status,
+    recoverability: raw.recoverability,
+    recoveryProbability: raw.recovery_probability,
+    expectedValue: raw.expected_value,
+    decisionReason: raw.decision_reason,
+    decision: raw.decision,
+    selectedAction: raw.selected_action,
+    stopReason: raw.stop_reason,
+    escalateReason: raw.escalate_reason,
+    outcome: raw.outcome,
+    amountRecovered: raw.amount_recovered,
+    retryCount: raw.retry_count,
+    messageCount: raw.message_count,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+  }
+}
+

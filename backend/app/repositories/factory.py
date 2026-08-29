@@ -16,6 +16,8 @@ from app.repositories.interfaces import (
     RecoveryCaseRepository,
     TransactionRepository,
 )
+from app.core.auth import DEFAULT_TEST_MERCHANT, DEV_MERCHANT_ID
+from app.models.domain import MerchantSettings
 from app.repositories.memory import (
     InMemoryActionRecordRepository,
     InMemoryAuditRecordRepository,
@@ -68,10 +70,21 @@ class RepositoryBundle:
 
 
 _shared_in_memory_bundle: Optional[RepositoryBundle] = None
+_shared_supabase_bundle: Optional[RepositoryBundle] = None
+
+
+def _seed_development_merchant(bundle: RepositoryBundle) -> None:
+    """Ensure the designated development merchant exists for demo login and legacy data."""
+    existing = bundle.merchants.get(DEV_MERCHANT_ID)
+    if not existing:
+        bundle.merchants.save(DEFAULT_TEST_MERCHANT)
+    settings_obj = bundle.merchants.get_settings(DEV_MERCHANT_ID)
+    if not getattr(settings_obj, "id", None):
+        bundle.merchants.save_settings(MerchantSettings(merchant_id=DEV_MERCHANT_ID))
 
 
 def create_in_memory_repositories() -> RepositoryBundle:
-    return RepositoryBundle(
+    bundle = RepositoryBundle(
         customers=InMemoryCustomerRepository(),
         transactions=InMemoryTransactionRepository(),
         cases=InMemoryRecoveryCaseRepository(),
@@ -83,6 +96,8 @@ def create_in_memory_repositories() -> RepositoryBundle:
         notifications=InMemoryNotificationRepository(),
         processed_webhooks=InMemoryProcessedWebhookEventRepository(),
     )
+    _seed_development_merchant(bundle)
+    return bundle
 
 
 def create_supabase_repositories(url: str, key: str) -> RepositoryBundle:
@@ -101,16 +116,55 @@ def create_supabase_repositories(url: str, key: str) -> RepositoryBundle:
     )
 
 
-def get_repository_bundle(app_settings: Optional[Settings] = None) -> RepositoryBundle:
+def reset_in_memory_repositories() -> RepositoryBundle:
+    """Clear all in-memory stores while preserving the singleton instance (test isolation)."""
     global _shared_in_memory_bundle
+    if _shared_in_memory_bundle is None:
+        _shared_in_memory_bundle = create_in_memory_repositories()
+        return _shared_in_memory_bundle
+
+    bundle = _shared_in_memory_bundle
+    bundle.merchants._store.clear()  # type: ignore[attr-defined]
+    bundle.merchants._settings.clear()  # type: ignore[attr-defined]
+    bundle.customers._store.clear()  # type: ignore[attr-defined]
+    bundle.customers._by_external_id.clear()  # type: ignore[attr-defined]
+    bundle.transactions._store.clear()  # type: ignore[attr-defined]
+    bundle.cases._store.clear()  # type: ignore[attr-defined]
+    bundle.cases._by_tx_id.clear()  # type: ignore[attr-defined]
+    bundle.actions._store.clear()  # type: ignore[attr-defined]
+    bundle.audits._store.clear()  # type: ignore[attr-defined]
+    bundle.policies._store.clear()  # type: ignore[attr-defined]
+    bundle.message_deliveries._store.clear()  # type: ignore[attr-defined]
+    bundle.notifications._store.clear()  # type: ignore[attr-defined]
+    bundle.processed_webhooks._store.clear()  # type: ignore[attr-defined]
+    _seed_development_merchant(bundle)
+    return bundle
+
+
+def get_repository_bundle(app_settings: Optional[Settings] = None) -> RepositoryBundle:
+    global _shared_in_memory_bundle, _shared_supabase_bundle
     cfg = app_settings or settings
     key = cfg.supabase_service_role_key or cfg.supabase_anon_key
-    # Only use remote Supabase when database_mode/app_env explicitly configured or when requested
-    if getattr(cfg, "database_mode", "") == "supabase" or (cfg.supabase_url and key and getattr(cfg, "payback_env", "") == "production"):
-        return create_supabase_repositories(cfg.supabase_url, key)
+    use_supabase = (
+        cfg.database_mode == "supabase"
+        and cfg.supabase_url
+        and key
+    )
+    if use_supabase:
+        if not cfg.supabase_service_role_key:
+            import logging
+            logging.getLogger(__name__).warning(
+                "SUPABASE_SERVICE_ROLE_KEY is not set; falling back to anon key. "
+                "Backend writes to merchants/policies may fail with HTTP 403."
+            )
+        if _shared_supabase_bundle is None:
+            _shared_supabase_bundle = create_supabase_repositories(cfg.supabase_url, key)
+        return _shared_supabase_bundle
     # Default to zero-cost, offline-safe singleton in-memory bundle for dev and test suites
     if _shared_in_memory_bundle is None:
         _shared_in_memory_bundle = create_in_memory_repositories()
+    else:
+        _seed_development_merchant(_shared_in_memory_bundle)
     return _shared_in_memory_bundle
 
 

@@ -113,6 +113,36 @@ class PaymentEventRequest(BaseModel):
     failure_reason: Optional[str] = None
 
 
+class CreatePaymentRequest(BaseModel):
+    """Payload for POST /api/v1/payments - Create Razorpay payment link"""
+    customer_id: str
+    amount: float
+    currency: Currency = Currency.INR
+    description: Optional[str] = "Payment"
+
+
+class CreatePaymentWithCustomerRequest(BaseModel):
+    """Payload for POST /api/v1/payments/create-with-customer - Create customer and payment link"""
+    customer_name: str
+    customer_email: str
+    customer_phone: str
+    amount: float
+    currency: Currency = Currency.INR
+    payment_method: PaymentMethod = PaymentMethod.CARD
+
+
+class CreatePaymentResponse(BaseModel):
+    """Response for payment creation"""
+    transaction_id: str
+    razorpay_order_id: Optional[str] = None
+    payment_link_url: Optional[str] = None
+    amount: float
+    currency: str
+    status: str
+    customer_name: str
+    created_at: datetime
+
+
 class StartRecoveryRequest(BaseModel):
     """Payload for POST /api/v1/recovery"""
     case_id: str

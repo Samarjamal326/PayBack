@@ -3,8 +3,14 @@ Shared test fixtures.
 """
 from __future__ import annotations
 
+import os
+
+# Force in-memory repositories for the entire test session (before app imports).
+os.environ["DATABASE_MODE"] = "memory"
+
 import pytest
 
+from app.config import settings
 from app.models.domain import (
     Customer,
     PaymentMethod,
@@ -14,6 +20,15 @@ from app.models.domain import (
     Transaction,
     TransactionStatus,
 )
+
+
+@pytest.fixture(autouse=True)
+def reset_in_memory_repositories():
+    import app.repositories.factory as factory
+
+    factory._shared_supabase_bundle = None
+    settings.database_mode = "memory"
+    factory.reset_in_memory_repositories()
 
 
 @pytest.fixture
