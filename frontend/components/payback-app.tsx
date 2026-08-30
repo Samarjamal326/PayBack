@@ -99,16 +99,156 @@ function Logo() {
 }
 
 
-function Status({ status }: { status: RecoveryStatus }) {
-  const styles: Record<RecoveryStatus, string> = {
-    Recovered: 'status-good',
-    'In review': 'status-warn',
-    Failed: 'status-bad',
+export function formatFailureReason(reason?: string): string {
+  if (!reason) return 'Payment not completed'
+  const trimmed = reason.trim()
+
+  const mapping: Record<string, string> = {
+    'BAD_REQUEST_ERROR': 'Invalid payment details provided',
+    'INSUFFICIENT_FUNDS': 'Payment declined due to insufficient funds',
+    'PAYMENT_FAILED': 'Payment processing could not be completed by bank',
+    'GATEWAY_ERROR': 'Bank payment gateway error, ready for smart retry',
+    'AUTHENTICATION_FAILED': 'Customer authentication / OTP verification failed',
+    'INVALID_CARD': 'Card details could not be verified by payment network',
+    'CARD_EXPIRED': 'Card has expired, update payment method',
+    'INVALID_CVV': 'Incorrect CVV security code entered',
+    'TIMEOUT': 'Payment session timed out waiting for authorization',
+    'CANCELLED': 'Payment attempt was cancelled by customer',
+    'card_declined': 'Card declined by issuing bank',
+    'insufficient_funds': 'Insufficient funds in customer account',
+    'payment_timed_out': 'Payment request timed out',
+    'bank_declined': 'Transaction declined by customer bank',
   }
+
+  if (mapping[trimmed]) return mapping[trimmed]
+  if (trimmed.startsWith('#') || /^[A-Za-z0-9_]{10,}$/.test(trimmed)) {
+    return 'Payment declined by bank network'
+  }
+  return trimmed.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+export function formatRecoveryStatus(status: string): string {
+  const statusMap: Record<string, string> = {
+    'detected': 'Payment Failed',
+    'analyzing': 'Analyzing',
+    'eligibility_check': 'Eligibility Check',
+    'decision': 'Decision Pending',
+    'action_pending': 'Action Pending',
+    'action_executed': 'Action Executed',
+    'monitoring': 'Monitoring',
+    'recovered': 'Recovered',
+    'escalated': 'Escalated',
+    'stopped': 'Stopped',
+    'in_review': 'In Review',
+  }
+  return statusMap[status] || status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+export function formatAuditRecord(record: AuditRecord): { title: string; description: string } {
+  const event = record.eventType
+  const detail = record.detail || ''
+
+  const eventTitleMap: Record<string, string> = {
+    payment_failed: 'Payment Failed',
+    recovery_case_created: 'Recovery Case Initialized',
+    eligibility_checked: 'Eligibility Verified',
+    action_selected: 'Recovery Action Selected',
+    payment_link_created: 'Recovery Link Generated',
+    decision_made: 'Strategy Determined',
+    payment_succeeded: 'Payment Recovered',
+    recovery_completed: 'Case Closed · Recovered',
+    recovery_stopped: 'Recovery Concluded',
+    recovery_escalated: 'Escalated for Team Review',
+    message_sent: 'Customer Reminder Sent',
+  }
+
+  const title = eventTitleMap[event] || event.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+
+  // Clean up detail to be user-friendly without raw JSON / hashes
+  let description = detail
+  if (event === 'payment_failed') {
+    description = 'The transaction was declined by the customer’s payment provider.'
+  } else if (event === 'recovery_case_created') {
+    description = 'PayBack opened an automated recovery workflow for this transaction.'
+  } else if (event === 'eligibility_checked') {
+    description = 'Customer evaluated against frequency caps, opt-out rules, and merchant policy.'
+  } else if (event === 'action_selected') {
+    if (detail.includes('create_payment_link')) {
+      description = 'Generated a secure Razorpay recovery checkout link.'
+    } else if (detail.includes('retry_payment')) {
+      description = 'Scheduled automated background payment retry with provider.'
+    } else {
+      description = 'Selected best-fit recovery action from ML decision engine.'
+    }
+  } else if (event === 'payment_link_created') {
+    description = 'Secure payment link created and attached to recovery case.'
+  } else if (event === 'decision_made') {
+    description = 'ML model determined highest-conversion recovery pathway.'
+  } else if (event === 'payment_succeeded' || event === 'recovery_completed') {
+    description = 'Customer completed payment successfully. Funds captured.'
+  }
+
+  return { title, description }
+}
+
+function Status({ status }: { status: string }) {
+  const normalized = status.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ')
+
+  let badgeClass = 'status-neutral'
+  let label = status
+
+  // Recovery lifecycle states
+  if (normalized === 'recovered' || normalized === 'success' || normalized === 'completed' || normalized === 'active') {
+    badgeClass = 'status-good'
+    label = normalized === 'recovered' ? 'Recovered' : normalized === 'success' ? 'Succeeded' : 'Active'
+  } else if (
+    normalized === 'in review' ||
+    normalized === 'detected' ||
+    normalized === 'analyzing' ||
+    normalized === 'eligibility check' ||
+    normalized === 'decision' ||
+    normalized === 'decision pending' ||
+    normalized === 'action pending' ||
+    normalized === 'awaiting customer' ||
+    normalized === 'recovering' ||
+    normalized === 'monitoring'
+  ) {
+    badgeClass = 'status-warn'
+    if (normalized === 'detected') label = 'Payment Failed'
+    else if (normalized === 'in review') label = 'In Review'
+    else if (normalized === 'analyzing') label = 'Analyzing'
+    else if (normalized === 'eligibility check') label = 'Eligibility Check'
+    else if (normalized === 'decision' || normalized === 'decision pending') label = 'Decision Pending'
+    else if (normalized === 'action pending') label = 'Action Pending'
+    else if (normalized === 'awaiting customer') label = 'Awaiting Customer'
+    else if (normalized === 'monitoring') label = 'Monitoring'
+    else label = 'In Review'
+  } else if (normalized === 'failed' || normalized === 'stopped' || normalized === 'cancelled') {
+    badgeClass = 'status-bad'
+    label = normalized === 'failed' ? 'Failed' : normalized === 'stopped' ? 'Stopped' : 'Cancelled'
+  } else if (normalized === 'escalated') {
+    badgeClass = 'status-warn'
+    label = 'Escalated'
+  } else if (
+    normalized === 'payment link created' ||
+    normalized === 'action executed' ||
+    normalized === 'email sent' ||
+    normalized === 'processing'
+  ) {
+    badgeClass = 'status-info'
+    if (normalized === 'payment link created') label = 'Link Created'
+    else if (normalized === 'action executed') label = 'Action Executed'
+    else if (normalized === 'email sent') label = 'Email Sent'
+    else label = 'Processing'
+  } else if (normalized === 'pending') {
+    badgeClass = 'status-neutral'
+    label = 'Pending'
+  }
+
   return (
-    <span className={`status ${styles[status] ?? 'status-warn'}`}>
+    <span className={`status ${badgeClass}`}>
       <span className="size-1.5 rounded-full bg-current" />
-      {status}
+      {label}
     </span>
   )
 }
@@ -341,6 +481,12 @@ function MiniChart({ trends }: { trends?: DashboardTrends | null }) {
   if (trends && trends.trends.length > 0) {
     const maxVal = Math.max(...trends.trends.map((t) => t.recoveredAmount), 1)
     const ySteps = [1, 0.75, 0.5, 0.25, 0]
+    
+    // Calculate how many dates to show based on total data points
+    const totalDataPoints = trends.trends.length
+    const maxLabelsToShow = 6  // Show at most 6 date labels
+    const stepSize = Math.max(1, Math.floor(totalDataPoints / maxLabelsToShow))
+    
     return (
       <div className="chart-wrap">
         <div className="chart-y">
@@ -360,7 +506,10 @@ function MiniChart({ trends }: { trends?: DashboardTrends | null }) {
         </div>
         <div className="chart-x">
           {trends.trends.map((t, i) => (
-            <span key={t.date || i}>{t.date.slice(5)}</span>
+            // Only show date labels at regular intervals to avoid overcrowding
+            i % stepSize === 0 || i === totalDataPoints - 1 ? (
+              <span key={t.date || i}>{t.date.slice(5)}</span>
+            ) : null
           ))}
         </div>
       </div>
@@ -386,26 +535,96 @@ function RecoveryTable({
 }) {
   const list = compact ? recoveriesList.slice(0, 4) : recoveriesList
 
-  function handleExportCSV() {
-    const headers = ['Case ID', 'Customer', 'Email', 'Amount (INR)', 'Status', 'Reason', 'Payment Method', 'Created']
-    const rows = recoveriesList.map((r) => [
-      r.id,
-      `"${r.customer}"`,
-      r.email,
-      r.amount,
-      r.status,
-      `"${r.reason}"`,
-      `"${r.payment}"`,
-      `"${r.created}"`,
-    ])
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n')
-    const encodedUri = encodeURI(csvContent)
-    const link = document.createElement('a')
-    link.setAttribute('href', encodedUri)
-    link.setAttribute('download', `payback_recoveries_${new Date().toISOString().slice(0, 10)}.csv`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+  async function handleExportCSV() {
+    try {
+      // Fetch full merchant recovery list for export to ensure full dataset
+      const fullRecoveries = await recoveriesService.listRecoveries({ limit: 500 })
+      const dataToExport = fullRecoveries.length > 0 ? fullRecoveries : recoveriesList
+
+      const headers = [
+        'Recovery Case ID',
+        'Customer ID',
+        'Customer Name',
+        'Customer Email',
+        'Transaction ID',
+        'Amount at Risk (INR)',
+        'Payment Status',
+        'Recovery Status',
+        'Current Stage',
+        'Failure Reason',
+        'Recovery Probability (%)',
+        'Selected Action',
+        'Decision Reason',
+        'Escalation Status',
+        'Escalation Reason',
+        'Amount Recovered (INR)',
+        'Outcome',
+        'Retry Count',
+        'Message Count',
+        'Created At',
+        'Updated At',
+      ]
+
+      const escapeCSV = (val: any) => {
+        if (val === null || val === undefined) return '""'
+        const str = String(val).replace(/"/g, '""')
+        return `"${str}"`
+      }
+
+      const rows = dataToExport.map((r: any) => [
+        escapeCSV(r.id),
+        escapeCSV(r.customerId),
+        escapeCSV(r.customerName || r.customer || 'Unknown'),
+        escapeCSV(r.customerEmail || r.email || 'Unknown'),
+        escapeCSV(r.transactionId || 'N/A'),
+        r.amountAtRisk ?? r.amount ?? 0,
+        escapeCSV(r.paymentStatus || 'Unknown'),
+        escapeCSV(r.status),
+        escapeCSV(formatRecoveryStatus(r.status)),
+        escapeCSV(formatFailureReason(r.reason)),
+        r.recoveryProbability ? Math.round(r.recoveryProbability * 100) : r.probability ?? 0,
+        escapeCSV(r.selectedAction || r.nextAction || 'N/A'),
+        escapeCSV(r.decisionReason || 'N/A'),
+        escapeCSV(r.escalateReason ? 'Escalated' : 'Not Escalated'),
+        escapeCSV(r.escalateReason || 'N/A'),
+        r.amountRecovered ?? (r.status === 'Recovered' || r.status === 'recovered' ? r.amountAtRisk ?? r.amount ?? 0 : 0),
+        escapeCSV(r.outcome || 'N/A'),
+        r.retryCount ?? r.retry_count ?? 0,
+        r.messageCount ?? r.message_count ?? 0,
+        escapeCSV(r.createdAt || r.created || new Date().toISOString()),
+        escapeCSV(r.updatedAt || r.updated || new Date().toISOString()),
+      ])
+
+      const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n')
+      const encodedUri = encodeURI(csvContent)
+      const link = document.createElement('a')
+      link.setAttribute('href', encodedUri)
+      link.setAttribute('download', `payback_recoveries_${new Date().toISOString().slice(0, 10)}.csv`)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    } catch (err) {
+      console.error('Failed to export full CSV:', err)
+      // Fallback to local list
+      const headers = ['Case ID', 'Customer', 'Email', 'Amount (INR)', 'Status', 'Reason', 'Created']
+      const rows = recoveriesList.map((r) => [
+        `"${r.id}"`,
+        `"${r.customer}"`,
+        `"${r.email}"`,
+        r.amount,
+        `"${r.status}"`,
+        `"${formatFailureReason(r.reason)}"`,
+        `"${r.created}"`,
+      ])
+      const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n')
+      const encodedUri = encodeURI(csvContent)
+      const link = document.createElement('a')
+      link.setAttribute('href', encodedUri)
+      link.setAttribute('download', `payback_recoveries_${new Date().toISOString().slice(0, 10)}.csv`)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    }
   }
 
   return (
@@ -420,7 +639,7 @@ function RecoveryTable({
             View all <ChevronRight className="size-4" />
           </Link>
         ) : (
-          <button className="button-secondary" onClick={handleExportCSV} title="Export recovery records to CSV">
+          <button className="button-secondary" onClick={handleExportCSV} title="Export full recovery dataset to CSV">
             <Download className="size-4" />
             Export CSV
           </button>
@@ -447,11 +666,11 @@ function RecoveryTable({
                   <td>
                     <Link href={`/recoveries/${r.id}`} className="customer-link">
                       <span className="avatar small">
-                        {(r.customer || 'Customer').split(' ').map((x: string) => x[0]).join('')}
+                        {(r.customer || 'Customer').split(' ').map((x: string) => x[0]).join('').toUpperCase().slice(0, 2)}
                       </span>
                       <span>
                         <b>{r.customer}</b>
-                        <small>{r.id}</small>
+                        <small>{r.id.slice(0, 16)}</small>
                       </span>
                     </Link>
                   </td>
@@ -459,7 +678,7 @@ function RecoveryTable({
                   <td>
                     <Status status={r.status} />
                   </td>
-                  <td className="text-muted-foreground">{r.reason}</td>
+                  <td className="text-muted-foreground">{formatFailureReason(r.reason)}</td>
                   <td className="text-muted-foreground">{r.created}</td>
                   <td>
                     <Link href={`/recoveries/${r.id}`} className="icon-btn" aria-label="View case">
@@ -679,39 +898,75 @@ function NewPaymentDialog({
   }
 
   async function pollPaymentStatus(txId: string) {
+    if (!txId) return
     try {
-      // Get auth headers
-      const session = localStorage.getItem('payback-auth-session')
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      }
-      
-      if (session) {
-        try {
-          const parsed = JSON.parse(session)
-          if (parsed.accessToken) {
-            headers['Authorization'] = `Bearer ${parsed.accessToken}`
-          }
-        } catch (e) {
-          console.error('Failed to parse auth session:', e)
-        }
-      }
-      
-      const response = await fetch(`http://localhost:8000/api/v1/payments/transaction/${txId}`, {
-        headers
-      })
-      
-      if (response.ok) {
-        const transaction = await response.json()
-        setPaymentStatus(transaction.status)
+      const transaction = await paymentsService.getTransaction(txId)
+      if (transaction && transaction.status) {
+        // Map backend status to display status
+        const normalizedStatus = transaction.status.toLowerCase()
+        const previousStatus = paymentStatus
         
-        // Continue polling if payment is still pending
-        if (transaction.status === 'pending') {
-          setTimeout(() => pollPaymentStatus(txId), 3000) // Poll every 3 seconds
+        if (normalizedStatus === 'success' || normalizedStatus === 'captured') {
+          setPaymentStatus('success')
+        } else if (normalizedStatus === 'failed') {
+          setPaymentStatus('failed')
+        } else {
+          setPaymentStatus(transaction.status)
+        }
+        
+        // If status changed from pending to terminal state, refresh app data
+        if (previousStatus === 'pending' && (normalizedStatus === 'success' || normalizedStatus === 'captured' || normalizedStatus === 'failed')) {
+          // Refresh all data to show updated recovery status
+          refreshAppData()
+        }
+        
+        // If still pending, continue polling every 2 seconds
+        if (normalizedStatus === 'pending') {
+          setTimeout(() => pollPaymentStatus(txId), 2000)
         }
       }
     } catch (error) {
       console.error('Failed to poll payment status:', error)
+    }
+  }
+
+  async function refreshAppData() {
+    try {
+      const [recs, custs] = await Promise.all([
+        recoveriesService.listRecoveries(),
+        customersService.listCustomers(),
+      ])
+
+      const customerMap = new Map<string, { name: string; email: string }>()
+      custs.forEach((c) => {
+        customerMap.set(c.id, { name: c.name, email: c.email || `${c.id}@example.com` })
+      })
+      setCustomersList(custs)
+
+      if (recs.length > 0) {
+        setRecoveriesList(
+          recs.map((r) => {
+            const custInfo = customerMap.get(r.customerId)
+            const custName = custInfo?.name || (r.customerId.includes('-') ? 'Rahul Verma' : r.customerId.replace('cus_', '').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()))
+            const custEmail = custInfo?.email || 'customer@example.com'
+            return {
+              id: r.id,
+              customerId: r.customerId,
+              customer: custName,
+              email: custEmail,
+              amount: r.amountAtRisk,
+              status: formatRecoveryStatus(r.status),
+              reason: r.reason,
+              created: 'Today, ' + new Date(r.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              payment: 'UPI ·•• 4821',
+              probability: Math.round(r.recoveryProbability * 100),
+              nextAction: r.selectedAction ? r.selectedAction.replace(/_/g, ' ') : 'Send reminder',
+            }
+          })
+        )
+      }
+    } catch (err) {
+      console.error('Failed to refresh app data:', err)
     }
   }
 
@@ -735,57 +990,58 @@ function NewPaymentDialog({
           <div className="dialog-form">
             <div className="payment-link-display">
               <p className="text-sm font-medium mb-3">Payment Link Created Successfully!</p>
-              
+
               {/* Payment Status Indicator */}
               <div className="mb-4 p-3 rounded-md" style={{
-                background: paymentStatus === 'completed' || paymentStatus === 'success' 
-                  ? '#dcfce7' 
-                  : paymentStatus === 'failed' 
-                    ? '#fee2e2' 
-                    : '#f1f5f9',
-                border: paymentStatus === 'completed' || paymentStatus === 'success' 
-                  ? '1px solid #22c55e' 
-                  : paymentStatus === 'failed' 
-                    ? '1px solid #ef4444' 
-                    : '1px solid #e2e8f0'
+                background: paymentStatus === 'success' || paymentStatus === 'captured' || paymentStatus === 'completed'
+                  ? 'rgba(34, 197, 94, 0.15)'
+                  : paymentStatus === 'failed'
+                    ? 'rgba(239, 68, 68, 0.15)'
+                    : 'rgba(234, 179, 8, 0.15)',
+                border: paymentStatus === 'success' || paymentStatus === 'captured' || paymentStatus === 'completed'
+                  ? '1px solid rgba(34, 197, 94, 0.3)'
+                  : paymentStatus === 'failed'
+                    ? '1px solid rgba(239, 68, 68, 0.3)'
+                    : '1px solid rgba(234, 179, 8, 0.3)'
               }}>
                 <div className="flex items-center gap-2">
                   <div className={`w-2 h-2 rounded-full ${
-                    paymentStatus === 'completed' || paymentStatus === 'success' 
-                      ? 'bg-green-500' 
-                      : paymentStatus === 'failed' 
-                        ? 'bg-red-500' 
+                    paymentStatus === 'success' || paymentStatus === 'captured' || paymentStatus === 'completed'
+                      ? 'bg-green-500'
+                      : paymentStatus === 'failed'
+                        ? 'bg-red-500'
                         : 'bg-yellow-500 animate-pulse'
                   }`}></div>
                   <span className="text-sm font-medium">
-                    Status: {paymentStatus ? paymentStatus.charAt(0).toUpperCase() + paymentStatus.slice(1) : 'Pending'}
+                    Status: {paymentStatus === 'success' || paymentStatus === 'captured' ? 'Successful' : paymentStatus === 'failed' ? 'Failed' : paymentStatus ? paymentStatus.charAt(0).toUpperCase() + paymentStatus.slice(1) : 'Pending'}
                   </span>
                 </div>
               </div>
-              
+
               <div className="payment-link-box">
-                <input 
-                  value={paymentLink} 
-                  readOnly 
-                  className="payment-link-input" 
-                  style={{ 
-                    flex: 1, 
-                    padding: '8px 12px', 
-                    border: '1px solid var(--border)', 
+                <input
+                  value={paymentLink}
+                  readOnly
+                  className="payment-link-input"
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    border: '1px solid var(--border)',
                     borderRadius: '6px',
                     background: 'var(--muted)',
+                    color: 'var(--foreground)',
                     fontSize: '13px'
-                  }} 
+                  }}
                 />
-                <button 
-                  onClick={() => navigator.clipboard.writeText(paymentLink)} 
+                <button
+                  onClick={() => navigator.clipboard.writeText(paymentLink)}
                   className="button-secondary"
                   style={{ marginLeft: '8px' }}
                 >
                   Copy Link
                 </button>
-                <button 
-                  onClick={() => window.open(paymentLink, '_blank')} 
+                <button
+                  onClick={() => window.open(paymentLink, '_blank')}
                   className="button-primary"
                   style={{ marginLeft: '8px' }}
                 >
@@ -1164,7 +1420,7 @@ function Dashboard({ user }: { user?: { name: string; email: string } | null }) 
     let mounted = true
     async function load() {
       try {
-        // Optimized: Reduce customer data fetch - only get minimal data needed for dashboard
+        // Optimized: Parallelize all independent dashboard API calls
         const [sum, tr, bdown, recs, custs] = await Promise.all([
           dashboardService.getDashboardSummary(),
           dashboardService.getDashboardTrends(),
@@ -1192,7 +1448,7 @@ function Dashboard({ user }: { user?: { name: string; email: string } | null }) 
                 customer: custInfo?.name || r.customerId.replace('cus_', '').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) || 'Customer',
                 email: custInfo?.email || `${r.customerId}@example.com`,
                 amount: r.amountAtRisk,
-                status: r.status === 'recovered' ? 'Recovered' : r.status === 'in_review' ? 'In review' : 'Failed',
+                status: formatRecoveryStatus(r.status),
                 reason: r.reason,
                 created: 'Today, ' + new Date(r.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 payment: 'UPI ·•• 4821',
@@ -1338,7 +1594,11 @@ function Recoveries({
   recoveriesList: Recovery[]
   onNewRecovery: () => void
 }) {
-  const [filter, setFilter] = useState<'All' | RecoveryStatus>('All')
+  const [filter, setFilter] = useState<string>('All')
+  
+  // Get unique statuses from the actual data
+  const uniqueStatuses = Array.from(new Set(recoveriesList.map(r => r.status)))
+  
   const filtered = filter === 'All' ? recoveriesList : recoveriesList.filter((r) => r.status === filter)
 
   return (
@@ -1357,15 +1617,15 @@ function Recoveries({
         <button className={`filter ${filter === 'All' ? 'active' : ''}`} onClick={() => setFilter('All')}>
           All <span>{recoveriesList.length}</span>
         </button>
-        <button className={`filter ${filter === 'In review' ? 'active' : ''}`} onClick={() => setFilter('In review')}>
-          In review <span>{recoveriesList.filter((r) => r.status === 'In review').length}</span>
-        </button>
-        <button className={`filter ${filter === 'Recovered' ? 'active' : ''}`} onClick={() => setFilter('Recovered')}>
-          Recovered <span>{recoveriesList.filter((r) => r.status === 'Recovered').length}</span>
-        </button>
-        <button className={`filter ${filter === 'Failed' ? 'active' : ''}`} onClick={() => setFilter('Failed')}>
-          Failed <span>{recoveriesList.filter((r) => r.status === 'Failed').length}</span>
-        </button>
+        {uniqueStatuses.map(status => (
+          <button 
+            key={status} 
+            className={`filter ${filter === status ? 'active' : ''}`} 
+            onClick={() => setFilter(status)}
+          >
+            {status} <span>{recoveriesList.filter((r) => r.status === status).length}</span>
+          </button>
+        ))}
       </div>
       <RecoveryTable recoveriesList={filtered} />
     </>
@@ -1377,16 +1637,19 @@ function Detail({ id }: { id: string }) {
   const [timeline, setTimeline] = useState<AuditRecord[]>([])
   const [customer, setCustomer] = useState<ApiCustomer | null>(null)
   const [customerMetrics, setCustomerMetrics] = useState<{ totalPaidAmount: number; recoveryCasesCount: number } | null>(null)
-  const fallback = getRecovery(id)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
+    setLoading(true)
+    setError(null)
     async function load() {
       try {
-        // Optimized: Limit timeline records for better performance
+        // Optimized: Parallelize recovery data and customer detail fetching
         const [c, tl] = await Promise.all([
           recoveriesService.getRecovery(id),
-          recoveriesService.getRecoveryTimeline(id, 20), // Limit to 20 most recent events
+          recoveriesService.getRecoveryTimeline(id, 20),
         ])
         if (!mounted) return
         setCaseData(c)
@@ -1403,28 +1666,58 @@ function Detail({ id }: { id: string }) {
               })
             }
           } catch {
-            // fallback
+            // non-fatal
           }
         }
       } catch (err) {
+        if (!mounted) return
         console.error('Failed to load recovery detail:', err)
+        setError(err instanceof Error ? err.message : 'Recovery case not found')
+      } finally {
+        if (mounted) setLoading(false)
       }
     }
     load()
     return () => { mounted = false }
   }, [id])
 
+  if (loading) {
+    return (
+      <>
+        <Link href="/recoveries" className="back-link">
+          ← Back to recoveries
+        </Link>
+        <PageIntro title="Loading recovery case..." subtitle="Fetching recovery workflow and timeline data..." />
+        <div className="panel" style={{ padding: '32px', textAlign: 'center' }}>
+          <p className="text-muted-foreground">Loading case details...</p>
+        </div>
+      </>
+    )
+  }
 
-  const prob = caseData ? Math.round(caseData.recoveryProbability * 100) : fallback.probability
-  const amount = caseData ? caseData.amountAtRisk : fallback.amount
-  const reason = caseData ? caseData.reason : fallback.reason
-  const statusStr: RecoveryStatus = caseData
-    ? caseData.status === 'recovered'
-      ? 'Recovered'
-      : caseData.status === 'in_review'
-      ? 'In review'
-      : 'Failed'
-    : fallback.status
+  if (error || !caseData) {
+    return (
+      <>
+        <Link href="/recoveries" className="back-link">
+          ← Back to recoveries
+        </Link>
+        <div className="panel" style={{ padding: '32px', textAlign: 'center' }}>
+          <h2>Recovery Case Not Found</h2>
+          <p className="text-muted-foreground mt-2 mb-4">
+            {error || `No recovery case was found with ID '${id}' in your workspace.`}
+          </p>
+          <Link href="/recoveries" className="button-primary">
+            Return to Recoveries
+          </Link>
+        </div>
+      </>
+    )
+  }
+
+  const prob = Math.round(caseData.recoveryProbability * 100)
+  const amount = caseData.amountAtRisk
+  const reason = formatFailureReason(caseData.reason)
+  const statusStr: RecoveryStatus = formatRecoveryStatus(caseData.status)
 
   const radius = 42
   const stroke = 6
@@ -1432,19 +1725,28 @@ function Detail({ id }: { id: string }) {
   const circumference = normalizedRadius * 2 * Math.PI
   const strokeDashoffset = circumference - (prob / 100) * circumference
 
+  const customerDisplayName = customer?.name || 'Customer'
+  const customerEmailDisplay = customer?.email || (caseData.customerId ? `${caseData.customerId}@example.com` : 'N/A')
+
   return (
     <>
       <Link href="/recoveries" className="back-link">
         ← Back to recoveries
       </Link>
-      <PageIntro title={customer?.name || (caseData ? 'Customer' : fallback.customer)} subtitle={`${id} · Created ${caseData ? new Date(caseData.createdAt).toLocaleString() : fallback.created}`} action={<Status status={statusStr} />} />
+      <PageIntro
+        title={customerDisplayName}
+        subtitle={`${id} · Created ${new Date(caseData.createdAt).toLocaleString()}`}
+        action={<Status status={statusStr} />}
+      />
       <div className="detail-grid">
         <div className="detail-main">
           <div className="hero-amount">
             <div>
               <p className="section-kicker">Amount to recover</p>
               <div className="amount">{formatINR(amount)}</div>
-              <p className="text-sm text-muted-foreground">{fallback.payment}</p>
+              <p className="text-sm text-muted-foreground">
+                Action: {caseData.selectedAction ? caseData.selectedAction.replace(/_/g, ' ') : 'Analyzing'}
+              </p>
             </div>
             <div className="score">
               <svg height="104" width="104">
@@ -1492,58 +1794,73 @@ function Detail({ id }: { id: string }) {
               <div>
                 <h3>{reason}</h3>
                 <p>
-                  {caseData?.decisionReason ||
-                    'The payment attempt was declined, but the customer has a strong history of successful payments. A low-friction reminder is the best next step.'}
+                  {caseData.decisionReason ||
+                    'PayBack is analyzing this customer’s payment pattern and sequencing recovery actions.'}
                 </p>
               </div>
             </div>
           </div>
+
+          {/* Escalation Card */}
+          {caseData.status === 'escalated' && (
+            <div className="panel" style={{ border: '2px solid rgba(245, 158, 11, 0.5)', background: 'rgba(245, 158, 11, 0.1)' }}>
+              <div className="panel-heading">
+                <p className="section-kicker" style={{ color: 'rgba(245, 158, 11, 0.9)' }}>Escalation Required</p>
+                <h2>Human Review Needed</h2>
+              </div>
+              <div style={{ padding: '16px' }}>
+                <div style={{ marginBottom: '12px' }}>
+                  <strong>Reason:</strong> {caseData.escalateReason ? caseData.escalateReason.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'Manual review required'}
+                </div>
+                <div style={{ marginBottom: '12px' }}>
+                  <strong>Payment Amount:</strong> {formatINR(amount)}
+                </div>
+                <div style={{ marginBottom: '12px' }}>
+                  <strong>Customer:</strong> {customerDisplayName}
+                </div>
+                <div style={{ marginBottom: '16px' }}>
+                  <strong>Why:</strong> {caseData.decisionReason || 'This case requires human review due to policy or high-value thresholds.'}
+                </div>
+                <div style={{ padding: '12px', background: 'rgba(245, 158, 11, 0.15)', borderRadius: '6px', marginBottom: '16px', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                  <strong>Next step:</strong> A human reviewer should review the payment and customer history before another recovery action is attempted.
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <Link href={`/customers/${caseData.customerId}`} className="button-secondary" style={{ fontSize: '13px' }}>
+                    Open Customer
+                  </Link>
+                  <button className="button-secondary" style={{ fontSize: '13px' }} disabled>
+                    View Payment
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="panel">
             <div className="panel-heading">
               <h2>Recovery timeline</h2>
-              <span className="text-sm text-muted-foreground">Today</span>
+              <span className="text-sm text-muted-foreground">
+                {timeline.length} events
+              </span>
             </div>
             <div className="timeline">
               {timeline.length > 0 ? (
-                timeline.map((t, idx) => (
-                  <div key={t.id || idx}>
-                    <span className="timeline-dot done">
-                      <Check className="size-3" />
-                    </span>
-                    <div>
-                      <b>{t.eventType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</b>
-                      <p>{t.detail}</p>
+                timeline.map((t, idx) => {
+                  const human = formatAuditRecord(t)
+                  return (
+                    <div key={t.id || idx}>
+                      <span className="timeline-dot done">
+                        <Check className="size-3" />
+                      </span>
+                      <div>
+                        <b>{human.title}</b>
+                        <p>{human.description}</p>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  )
+                })
               ) : (
-                <>
-                  <div>
-                    <span className="timeline-dot done">
-                      <Check className="size-3" />
-                    </span>
-                    <div>
-                      <b>Payment failed</b>
-                      <p>Today at 10:42 AM · {reason}</p>
-                    </div>
-                  </div>
-                  <div>
-                    <span className="timeline-dot done">
-                      <Check className="size-3" />
-                    </span>
-                    <div>
-                      <b>Case created</b>
-                      <p>Today at 10:43 AM · Automatically added to queue</p>
-                    </div>
-                  </div>
-                  <div>
-                    <span className="timeline-dot current" />
-                    <div>
-                      <b>Recommended action</b>
-                      <p>Send a gentle reminder via email</p>
-                    </div>
-                  </div>
-                </>
+                <p className="text-muted-foreground p-4">No audit events recorded yet.</p>
               )}
             </div>
           </div>
@@ -1553,16 +1870,16 @@ function Detail({ id }: { id: string }) {
             <p className="section-kicker">Customer</p>
             <div className="customer-profile">
               <div className="avatar large">
-                {(customer?.name || fallback.customer).split(' ').map((x) => x[0]).join('')}
+                {customerDisplayName.split(' ').map((x: string) => x[0]).join('').toUpperCase().slice(0, 2)}
               </div>
               <div>
-                <h3>{customer?.name || fallback.customer}</h3>
-                <p>{customer?.email || fallback.email}</p>
+                <h3>{customerDisplayName}</h3>
+                <p>{customerEmailDisplay}</p>
               </div>
             </div>
             <div className="side-row">
               <span>Lifetime value</span>
-              <b>{formatINR(customerMetrics?.totalPaidAmount ?? fallback.amount)}</b>
+              <b>{formatINR(customerMetrics?.totalPaidAmount ?? amount)}</b>
             </div>
             <div className="side-row">
               <span>Recovery cases</span>
@@ -1572,15 +1889,14 @@ function Detail({ id }: { id: string }) {
           <div className="panel">
             <p className="section-kicker">Message preview</p>
             <div className="message-preview">
-              <p>Hi {(customer?.name || fallback.customer).split(' ')[0]},</p>
+              <p>Hi {customerDisplayName.split(' ')[0]},</p>
               <p>
-                We noticed a payment didn&apos;t go through. No worries — you can update your payment method in just a moment.
+                We noticed a payment of {formatINR(amount)} couldn't be completed. You can securely complete your payment in just a moment.
               </p>
               <p>— The PayBack team</p>
             </div>
           </div>
         </aside>
-
       </div>
     </>
   )
@@ -1662,11 +1978,18 @@ function Analytics() {
                 })}
               </div>
               <div className="chart-x">
-                {trends.trends.map((t, i) => (
-                  i % Math.max(1, Math.floor(trends.trends.length / 4)) === 0
-                    ? <span key={i}>{t.date.slice(5)}</span>
-                    : null
-                )).filter(Boolean)}
+                {(() => {
+                  const totalDataPoints = trends.trends.length
+                  const maxLabelsToShow = 6  // Show at most 6 date labels
+                  const stepSize = Math.max(1, Math.floor(totalDataPoints / maxLabelsToShow))
+                  
+                  return trends.trends.map((t, i) => (
+                    // Only show date labels at regular intervals to avoid overcrowding
+                    i % stepSize === 0 || i === totalDataPoints - 1 ? (
+                      <span key={i}>{t.date.slice(5)}</span>
+                    ) : null
+                  )).filter(Boolean)
+                })()}
               </div>
             </div>
           ) : (
@@ -1732,48 +2055,28 @@ function Analytics() {
 }
 
 function Customers() {
-  const [customerList, setCustomerList] = useState<Customer[]>([])
-  const [recentFailures, setRecentFailures] = useState<any[]>([])
+  const [customerList, setCustomerList] = useState<ApiCustomer[]>([])
+  const [recentFailures, setRecentFailures] = useState<RecoveryCase[]>([])
+  const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let mounted = true
     async function load() {
       try {
+        // Optimized: Parallelize customer and recovery data fetching
         const [apiCusts, recoveries] = await Promise.all([
-          customersService.listCustomers(),
-          recoveriesService.listRecoveries({ limit: 10 })
+          customersService.listCustomers({ limit: 100 }),
+          recoveriesService.listRecoveries({ limit: 10 }),
         ])
         if (!mounted) return
         
         // Filter recent failed payments
-        const failedPayments = recoveries.filter(r => r.status === 'detected' || r.status === 'failed' || r.status === 'in_review')
+        const failedPayments = recoveries.filter(
+          (r) => r.status === 'detected' || r.status === 'failed' || r.status === 'in_review'
+        )
         setRecentFailures(failedPayments)
-        
-        if (apiCusts.length > 0) {
-          // Fetch detail (with metrics) for each customer in parallel
-          const details = await Promise.allSettled(
-            apiCusts.map((c) => customersService.getCustomerDetail(c.id))
-          )
-          if (!mounted) return
-          setCustomerList(
-            apiCusts.map((c, idx) => {
-              const detail = details[idx]?.status === 'fulfilled' ? details[idx].value : null
-              return {
-                id: c.id,
-                name: c.name,
-                email: c.email || `${c.id}@example.com`,
-                company: 'Commerce Org',
-                lifetime: detail ? detail.metrics.totalPaidAmount : 0,
-                cases: detail ? detail.metrics.recoveryCasesCount : 0,
-                lastPayment: c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A',
-                joined: c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'N/A',
-                segment: 'Growth',
-                recoveryRate: detail ? Math.round(detail.metrics.recoveryRate * 100) : 0,
-              }
-            })
-          )
-        }
+        setCustomerList(apiCusts)
       } catch (err) {
         console.error('Failed to load customers:', err)
       } finally {
@@ -1783,6 +2086,13 @@ function Customers() {
     load()
     return () => { mounted = false }
   }, [])
+
+  const filtered = customerList.filter((c) =>
+    !searchQuery ||
+    c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (c.email && c.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
+    c.id.toLowerCase().includes(searchQuery.toLowerCase())
+  )
 
   return (
     <>
@@ -1794,7 +2104,11 @@ function Customers() {
         <div className="table-heading">
           <div className="search">
             <Search className="size-4 text-muted-foreground" />
-            <input placeholder="Search customers..." />
+            <input
+              placeholder="Search customers..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -1804,32 +2118,58 @@ function Customers() {
                 <th>Customer</th>
                 <th>Lifetime value</th>
                 <th>Open cases</th>
-                <th>Last payment</th>
+                <th>Joined</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {customerList.map((c, idx) => (
-                <tr key={`${c.id || c.email}-${idx}`}>
-                  <td>
-                    <Link href={`/customers/${c.id}`} className="customer-link">
-                      <div className="avatar small">{c.name.split(' ').map((x: string) => x[0]).join('')}</div>
-                      <span>
-                        <b>{c.name}</b>
-                        <small>{c.email}</small>
-                      </span>
-                    </Link>
-                  </td>
-                  <td>{formatINR(c.lifetime)}</td>
-                  <td>{c.cases}</td>
-                  <td className="text-muted-foreground">{c.lastPayment}</td>
-                  <td>
-                    <Link href={`/customers/${c.id}`} className="icon-btn" aria-label="View customer">
-                      <ChevronRight className="size-4" />
-                    </Link>
+              {loading ? (
+                <>
+                  {[1, 2, 3].map((n) => (
+                    <tr key={n}>
+                      <td colSpan={5} className="text-muted-foreground text-center py-4">
+                        Loading customer records...
+                      </td>
+                    </tr>
+                  ))}
+                </>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="text-center text-muted-foreground py-6">
+                    {searchQuery ? 'No matching customers found' : 'No customers recorded yet'}
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filtered.map((c) => (
+                  <tr key={c.id}>
+                    <td>
+                      <Link href={`/customers/${c.id}`} className="customer-link">
+                        <div className="avatar small">{c.name.split(' ').map((x: string) => x[0]).join('').toUpperCase().slice(0, 2)}</div>
+                        <span>
+                          <b>{c.name}</b>
+                          <small>{c.email || `${c.id}@example.com`}</small>
+                        </span>
+                      </Link>
+                    </td>
+                    <td>{formatINR(c.totalPaidAmount ?? 0)}</td>
+                    <td>
+                      {(c.openRecoveryCases ?? 0) > 0 ? (
+                        <span className="status status-warn">{c.openRecoveryCases} open</span>
+                      ) : (
+                        <span className="text-muted-foreground">0</span>
+                      )}
+                    </td>
+                    <td className="text-muted-foreground">
+                      {c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
+                    </td>
+                    <td>
+                      <Link href={`/customers/${c.id}`} className="icon-btn" aria-label="View customer">
+                        <ChevronRight className="size-4" />
+                      </Link>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -1887,21 +2227,21 @@ function Customers() {
 function CustomerDetail({ id }: { id: string }) {
   const [detail, setDetail] = useState<ApiCustomerDetail | null>(null)
   const [loading, setLoading] = useState(true)
-  const fallback = getCustomer(id)
-  const fallbackPayments = fallback ? getCustomerPayments(fallback.id) : []
-  const fallbackRecoveries = fallback ? getCustomerRecoveries(fallback.id) : []
-  const fallbackEvents = fallback ? getCustomerTimeline(fallback.id) : []
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
     setLoading(true)
+    setError(null)
     async function load() {
       try {
         const d = await customersService.getCustomerDetail(id)
         if (!mounted) return
         setDetail(d)
       } catch (err) {
+        if (!mounted) return
         console.error('Failed to load customer detail:', err)
+        setError(err instanceof Error ? err.message : 'Customer not found')
       } finally {
         if (mounted) setLoading(false)
       }
@@ -1910,30 +2250,69 @@ function CustomerDetail({ id }: { id: string }) {
     return () => { mounted = false }
   }, [id])
 
-  const name = detail ? detail.customer.name : (fallback?.name || 'Loading...')
-  const email = detail ? detail.customer.email || `${id}@example.com` : (fallback?.email || 'Loading...')
-  const lifetime = detail ? detail.metrics.totalPaidAmount : (fallback?.lifetime || 0)
-  const recoveryRate = detail ? Math.round(detail.metrics.recoveryRate * 100) : (fallback?.recoveryRate || 0)
-  const openCases = detail ? detail.metrics.recoveryCasesCount : (fallback?.cases || 0)
+  if (loading) {
+    return (
+      <>
+        <Link href="/customers" className="back-link">
+          ← Back to customers
+        </Link>
+        <PageIntro
+          title="Loading customer..."
+          subtitle="Fetching account history and recovery performance..."
+        />
+        <div className="metric-grid">
+          <Metric label="Lifetime value" value="—" change="Live" note="Calculating..." />
+          <Metric label="Recovery rate" value="—" change="Live" note="Customer score" />
+          <Metric label="Open recoveries" value="—" change="Live" note="Queue status" />
+          <Metric label="Total payments" value="—" change="Live" note="Activity" />
+        </div>
+        <div className="dashboard-grid">
+          <div className="panel">
+            <div className="panel-heading">
+              <div>
+                <p className="section-kicker">Payment history</p>
+                <h2>Recent payments</h2>
+              </div>
+            </div>
+            <p className="text-muted-foreground p-6 text-center">Loading transactions...</p>
+          </div>
+          <div className="panel">
+            <div className="panel-heading">
+              <div>
+                <p className="section-kicker">Activity</p>
+                <h2>Customer timeline</h2>
+              </div>
+            </div>
+            <p className="text-muted-foreground p-6 text-center">Loading timeline...</p>
+          </div>
+        </div>
+      </>
+    )
+  }
 
-  const txList = detail && detail.recentTransactions.length > 0
-    ? detail.recentTransactions.map((t) => ({
-        id: t.id,
-        amount: t.amount,
-        method: t.paymentMethod ? t.paymentMethod.replace(/_/g, ' ') : 'UPI ·•• 4821',
-        status: t.status === 'success' ? 'Succeeded' : 'Failed',
-        date: 'Today',
-      }))
-    : fallbackPayments
+  if (error || !detail) {
+    return (
+      <>
+        <Link href="/customers" className="back-link">
+          ← Back to customers
+        </Link>
+        <div className="panel" style={{ padding: '32px', textAlign: 'center' }}>
+          <h2>Customer Record Not Found</h2>
+          <p className="text-muted-foreground mt-2 mb-4">
+            {error || `No customer was found with ID '${id}' in your workspace.`}
+          </p>
+          <Link href="/customers" className="button-primary">
+            Return to Customers
+          </Link>
+        </div>
+      </>
+    )
+  }
 
-  const recList = detail && detail.recentRecoveries.length > 0
-    ? detail.recentRecoveries.map((r) => ({
-        id: r.id,
-        amount: r.amountAtRisk,
-        status: (r.status === 'recovered' ? 'Recovered' : r.status === 'in_review' ? 'In review' : 'Failed') as RecoveryStatus,
-        reason: r.reason,
-      }))
-    : fallbackRecoveries
+  const { customer, metrics, recentTransactions, recentRecoveries } = detail
+  const lifetime = metrics.totalPaidAmount
+  const recoveryRate = Math.round(metrics.recoveryRate * 100)
+  const openCases = metrics.recoveryCasesCount - metrics.successfulRecoveriesCount
 
   return (
     <>
@@ -1941,15 +2320,15 @@ function CustomerDetail({ id }: { id: string }) {
         ← Back to customers
       </Link>
       <PageIntro
-        title={name}
-        subtitle={fallback ? `${fallback.company} · Customer since ${fallback.joined}` : 'Loading customer details...'}
-        action={<button className="button-secondary">Edit profile</button>}
+        title={customer.name}
+        subtitle={`${customer.email || `${customer.id}@example.com`} · Customer since ${customer.createdAt ? new Date(customer.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'N/A'}`}
+        action={<span className="status status-neutral">{customer.id}</span>}
       />
       <div className="metric-grid">
-        <Metric label="Lifetime value" value={formatINR(lifetime)} change="12.4%" note={fallback ? `${fallback.segment} segment` : 'Loading...'} />
-        <Metric label="Recovery rate" value={`${recoveryRate}%`} change="8.2%" note="Customer success score" />
-        <Metric label="Open recoveries" value={openCases.toString()} change="1" note="Needs attention" positive={false} />
-        <Metric label="Last payment" value={fallback?.lastPayment || 'Loading...'} change="On time" note="Payment activity" />
+        <Metric label="Lifetime value" value={formatINR(lifetime)} change="Live" note={`${metrics.successfulPayments} paid`} />
+        <Metric label="Recovery rate" value={`${recoveryRate}%`} change="Live" note="Customer success score" />
+        <Metric label="Open recoveries" value={Math.max(0, openCases).toString()} change="Live" note="Needs attention" positive={openCases === 0} />
+        <Metric label="Total transactions" value={metrics.totalPayments.toString()} change="Live" note={`${metrics.failedPayments} failed`} />
       </div>
       <div className="dashboard-grid">
         <div className="panel">
@@ -1971,29 +2350,27 @@ function CustomerDetail({ id }: { id: string }) {
                 </tr>
               </thead>
               <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={5} className="text-center text-muted-foreground">Loading payments...</td>
-                  </tr>
-                ) : txList.length > 0 ? (
-                  txList.map((p) => (
+                {recentTransactions.length > 0 ? (
+                  recentTransactions.map((p) => (
                     <tr key={p.id}>
                       <td>
-                        <b>{p.id}</b>
+                        <b>{p.id.slice(0, 16)}</b>
                       </td>
                       <td>{formatINR(p.amount)}</td>
-                      <td className="text-muted-foreground">{p.method}</td>
+                      <td className="text-muted-foreground">{p.paymentMethod ? p.paymentMethod.replace(/_/g, ' ') : 'UPI'}</td>
                       <td>
-                        <span className={`status ${p.status === 'Succeeded' ? 'status-good' : 'status-warn'}`}>
-                          {p.status}
+                        <span className={`status ${p.status === 'success' ? 'status-good' : p.status === 'pending' ? 'status-neutral' : 'status-bad'}`}>
+                          {p.status.charAt(0).toUpperCase() + p.status.slice(1)}
                         </span>
                       </td>
-                      <td className="text-muted-foreground">{p.date}</td>
+                      <td className="text-muted-foreground">
+                        {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : 'Today'}
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5} className="text-center text-muted-foreground">No payments found</td>
+                    <td colSpan={5} className="text-center text-muted-foreground py-6">No payments recorded for this customer</td>
                   </tr>
                 )}
               </tbody>
@@ -2004,27 +2381,30 @@ function CustomerDetail({ id }: { id: string }) {
           <div className="panel-heading">
             <div>
               <p className="section-kicker">Activity</p>
-              <h2>Customer timeline</h2>
+              <h2>Customer overview</h2>
             </div>
           </div>
-          <div className="timeline">
-            {loading ? (
-              <p className="text-muted-foreground">Loading timeline...</p>
-            ) : fallbackEvents.length > 0 ? (
-              fallbackEvents.map((e, i) => (
-                <div key={`${e.label}-${i}`}>
-                  <span className={`timeline-dot ${e.kind === 'success' ? 'done' : 'current'}`} />
-                  <div>
-                    <b>{e.label}</b>
-                    <p>
-                      {e.date} · {e.detail}
-                    </p>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-muted-foreground">No timeline events available</p>
-            )}
+          <div className="customer-profile">
+            <div className="avatar large">
+              {customer.name.split(' ').map((x: string) => x[0]).join('').toUpperCase().slice(0, 2)}
+            </div>
+            <div>
+              <h3>{customer.name}</h3>
+              <p>{customer.email || 'No email recorded'}</p>
+              <p className="text-xs text-muted-foreground mt-1">{customer.phone || 'No phone recorded'}</p>
+            </div>
+          </div>
+          <div className="side-row">
+            <span>Customer ID</span>
+            <b style={{ fontSize: '11px' }}>{customer.id}</b>
+          </div>
+          <div className="side-row">
+            <span>Historical success</span>
+            <b>{Math.round(metrics.historicalSuccessRate * 100)}%</b>
+          </div>
+          <div className="side-row">
+            <span>Recovered revenue</span>
+            <b>{formatINR(metrics.recoveredRevenue)}</b>
           </div>
         </div>
       </div>
@@ -2043,39 +2423,37 @@ function CustomerDetail({ id }: { id: string }) {
                 <th>Amount</th>
                 <th>Status</th>
                 <th>Reason</th>
+                <th>Created</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={5} className="text-center text-muted-foreground">Loading recovery cases...</td>
-                </tr>
-              ) : recList.length > 0 ? (
-                recList.map((r) => (
+              {recentRecoveries.length > 0 ? (
+                recentRecoveries.map((r) => (
                   <tr key={r.id}>
                     <td>
                       <Link href={`/recoveries/${r.id}`} className="customer-link">
-                        <b>{r.id}</b>
+                        <b>{r.id.slice(0, 16)}</b>
                       </Link>
                     </td>
-                  <td>{formatINR(r.amount)}</td>
-                  <td>
-                    <Status status={r.status} />
-                  </td>
-                  <td className="text-muted-foreground">{r.reason}</td>
-                  <td>
-                    <Link href={`/recoveries/${r.id}`} className="icon-btn" aria-label="View case">
-                      <ChevronRight className="size-4" />
-                    </Link>
-                  </td>
+                    <td>{formatINR(r.amountAtRisk)}</td>
+                    <td>
+                      <Status status={formatRecoveryStatus(r.status)} />
+                    </td>
+                    <td className="text-muted-foreground">{r.reason}</td>
+                    <td className="text-muted-foreground">{new Date(r.createdAt).toLocaleDateString()}</td>
+                    <td>
+                      <Link href={`/recoveries/${r.id}`} className="icon-btn" aria-label="View case">
+                        <ChevronRight className="size-4" />
+                      </Link>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={6} className="text-center text-muted-foreground py-6">No recovery cases for this customer</td>
                 </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={5} className="text-center text-muted-foreground">No recovery cases found</td>
-              </tr>
-            )}
+              )}
             </tbody>
           </table>
         </div>
@@ -2263,6 +2641,7 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
     let mounted = true
     async function loadData() {
       try {
+        // Optimized: Parallelize all independent API calls on initial load
         const [pols, notifs, profile, notifSet, recs, custs] = await Promise.allSettled([
           policiesService.listPolicies(),
           notifService.listNotifications(),
@@ -2336,7 +2715,7 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
                 customer: custName,
                 email: custEmail,
                 amount: r.amountAtRisk,
-                status: r.status === 'recovered' ? 'Recovered' : r.status === 'in_review' ? 'In review' : 'Failed',
+                status: formatRecoveryStatus(r.status),
                 reason: r.reason,
                 created: 'Today, ' + new Date(r.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 payment: 'UPI ·•• 4821',
@@ -2401,7 +2780,7 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
               customer: custInfo?.name || rec.customer,
               email: custInfo?.email || rec.email,
               amount: r.amountAtRisk,
-              status: r.status === 'recovered' ? 'Recovered' : r.status === 'in_review' ? 'In review' : 'Failed',
+              status: formatRecoveryStatus(r.status),
               reason: r.reason,
               created: 'Just now',
               payment: rec.payment,
@@ -2523,13 +2902,13 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
   if (view === 'recoveries') {
     content = <Recoveries recoveriesList={recoveriesList} onNewRecovery={() => setRecoveryModalOpen(true)} />
   } else if (view === 'detail') {
-    content = <Detail id={id ?? 'RCV-2048'} />
+    content = <Detail id={id ?? ''} />
   } else if (view === 'analytics') {
     content = <Analytics />
   } else if (view === 'customers') {
     content = <Customers />
   } else if (view === 'customer-detail') {
-    content = <CustomerDetail id={id ?? 'cus_maya'} />
+    content = <CustomerDetail id={id ?? ''} />
   } else if (view === 'policies') {
     content = (
       <PoliciesPage
