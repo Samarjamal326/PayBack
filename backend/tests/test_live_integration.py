@@ -24,6 +24,7 @@ class TestLiveSupabase:
         repos = create_supabase_repositories(settings.supabase_url, key)
 
         c = Customer(
+            merchant_id="merchant_default",  # Provide merchant_id for tenant isolation
             name="Live Test Customer",
             email="live_test@example.com",
             phone="+919876543210",

@@ -102,6 +102,21 @@ class SupabaseClient:
             result = resp.json()
             return result[0] if isinstance(result, list) and result else data
 
+    def delete(self, table: str, params: dict[str, str]) -> None:
+        """Delete rows from a table based on filter parameters."""
+        headers = {**self._headers, "Prefer": "return=representation"}
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.delete(
+                f"{self.url}/rest/v1/{table}",
+                params=params,
+                headers=headers,
+            )
+            if resp.status_code in (401, 403):
+                raise SupabaseAccessError(table, resp.status_code, resp.text[:300])
+            # 404 is acceptable for delete operations (no rows to delete)
+            if resp.status_code not in (200, 204, 404):
+                resp.raise_for_status()
+
 
 class SupabaseCustomerRepository(CustomerRepository):
     DB_COLUMNS = {"id", "merchant_id", "external_id", "name", "email", "phone", "opted_out", "created_at"}

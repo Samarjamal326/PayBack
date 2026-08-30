@@ -190,10 +190,12 @@ button { cursor: pointer; }
 .customer-link small { display: block; margin-top: 3px; color: var(--muted-foreground); font-size: 11px; }
 
 
-.status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+.status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap; }
 .status-good { color: var(--status-good-text); background: var(--status-good-bg); }
 .status-warn { color: var(--status-warn-text); background: var(--status-warn-bg); }
 .status-bad { color: var(--status-bad-text); background: var(--status-bad-bg); }
+.status-info { color: #38bdf8; background: rgba(56, 189, 248, 0.12); }
+.status-neutral { color: var(--muted-foreground); background: var(--muted); }
 
 .button-primary, .button-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 8px; padding: 9px 15px; color: var(--primary-foreground); background: var(--primary); font-size: 12px; font-weight: 600; text-decoration: none; transition: opacity .15s; }
 .button-primary:hover { opacity: .9; }

@@ -47,16 +47,15 @@ async def razorpay_webhook(
 ) -> WebhookResponse:
     raw_body = await request.body()
 
-    # TEMPORARILY DISABLED FOR TESTING - Re-enable for production
-    # # Verify signature if secret is configured
-    # if settings.razorpay_webhook_secret:
-    #     if not x_razorpay_signature or not verify_webhook_signature(
-    #         raw_body=raw_body,
-    #         signature=x_razorpay_signature,
-    #         secret=settings.razorpay_webhook_secret,
-    #     ):
-    #         logger.warning("Razorpay webhook signature verification failed.")
-    #         raise HTTPException(status_code=400, detail="Invalid webhook signature")
+    # Verify signature if secret is configured
+    if settings.razorpay_webhook_secret:
+        if not x_razorpay_signature or not verify_webhook_signature(
+            raw_body=raw_body,
+            signature=x_razorpay_signature,
+            secret=settings.razorpay_webhook_secret,
+        ):
+            logger.warning("Razorpay webhook signature verification failed.")
+            raise HTTPException(status_code=400, detail="Invalid webhook signature")
 
     try:
         event_data = json.loads(raw_body.decode("utf-8"))

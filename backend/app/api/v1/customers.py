@@ -24,7 +24,34 @@ def list_customers(
     merchant: Merchant = Depends(get_current_merchant),
 ) -> list[CustomerResponse]:
     customers = _repos.customers.list_by_merchant(merchant_id=merchant.id, limit=limit, offset=offset)
-    return [CustomerResponse(**c.model_dump()) for c in customers]
+    if not customers:
+        return []
+
+    # Efficient batch aggregation for the returned customers
+    customer_ids = {c.id for c in customers}
+    
+    # Pre-fetch recent transactions and cases for this merchant in single queries
+    all_txs = _repos.transactions.list_by_merchant(merchant_id=merchant.id, limit=1000)
+    all_cases = _repos.cases.list_by_merchant(merchant_id=merchant.id, limit=1000)
+
+    paid_map: dict[str, float] = {}
+    for t in all_txs:
+        if t.customer_id in customer_ids and t.status == TransactionStatus.SUCCESS:
+            paid_map[t.customer_id] = paid_map.get(t.customer_id, 0.0) + t.amount
+
+    open_cases_map: dict[str, int] = {}
+    for c in all_cases:
+        if c.customer_id in customer_ids and c.status not in (RecoveryStatus.RECOVERED, RecoveryStatus.STOPPED, RecoveryStatus.ESCALATED):
+            open_cases_map[c.customer_id] = open_cases_map.get(c.customer_id, 0) + 1
+
+    return [
+        CustomerResponse(
+            **c.model_dump(),
+            total_paid_amount=round(paid_map.get(c.id, 0.0), 2),
+            open_recovery_cases=open_cases_map.get(c.id, 0),
+        )
+        for c in customers
+    ]
 
 
 @router.get("/{customer_id}", response_model=CustomerDetailResponse)

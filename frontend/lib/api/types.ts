@@ -75,6 +75,8 @@ export type ApiCustomer = {
   email?: string
   phone?: string
   optedOut: boolean
+  totalPaidAmount?: number
+  openRecoveryCases?: number
   createdAt: string
 }
 

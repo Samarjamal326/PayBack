@@ -128,25 +128,26 @@ def process_razorpay_webhook_event(
         )
 
     # Record successful processing in idempotency repo
-    # TEMPORARILY DISABLED - Still having database upsert issues
-    # if guard and provider_event_id and result.processed:
-    #     # Extract merchant_id from the result if available
-    #     merchant_id = None
-    #     if result.case_id:
-    #         try:
-    #             case = recovery_service.get_case(result.case_id)
-    #             if case:
-    #                 merchant_id = case.merchant_id
-    #         except Exception:
-    #             pass
-    #     
-    #     guard.record_processed_event(
-    #         provider="razorpay",
-    #         provider_event_id=provider_event_id,
-    #         event_type=event_type,
-    #         merchant_id=merchant_id,
-    #         status=WebhookProcessingStatus.PROCESSED,
-    #     )
+    if guard and provider_event_id and result.processed:
+        try:
+            merchant_id = None
+            if result.case_id:
+                try:
+                    case = recovery_service.get_case(result.case_id)
+                    if case:
+                        merchant_id = case.merchant_id
+                except Exception:
+                    pass
+            
+            guard.record_processed_event(
+                provider="razorpay",
+                provider_event_id=provider_event_id,
+                event_type=event_type,
+                merchant_id=merchant_id,
+                status=WebhookProcessingStatus.PROCESSED,
+            )
+        except Exception as guard_exc:
+            logger.warning("Failed to record processed webhook event in guard: %s", guard_exc)
 
     return result
 

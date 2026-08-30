@@ -31,6 +31,8 @@ export async function listCustomers(params?: { limit?: number; offset?: number }
     email?: string
     phone?: string
     opted_out: boolean
+    total_paid_amount?: number
+    open_recovery_cases?: number
     created_at: string
   }>>('/api/v1/customers', { params })
 
@@ -42,6 +44,8 @@ export async function listCustomers(params?: { limit?: number; offset?: number }
     email: c.email,
     phone: c.phone,
     optedOut: c.opted_out,
+    totalPaidAmount: c.total_paid_amount ?? 0,
+    openRecoveryCases: c.open_recovery_cases ?? 0,
     createdAt: c.created_at,
   }))
 }

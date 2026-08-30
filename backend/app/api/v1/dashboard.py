@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends
 
 from app.api.schemas import (
@@ -70,7 +70,12 @@ def get_dashboard_summary(merchant: Merchant = Depends(get_current_merchant)) ->
 @router.get("/trends", response_model=DashboardTrendsResponse)
 def get_dashboard_trends(merchant: Merchant = Depends(get_current_merchant)) -> DashboardTrendsResponse:
     # Optimized: Reduce limit from 1000 to 100 for better performance
-    cases = _repos.cases.list_by_merchant(merchant_id=merchant.id, limit=100)
+    # Filter to last 30 days for better chart density
+    thirty_days_ago = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=30)
+    all_cases = _repos.cases.list_by_merchant(merchant_id=merchant.id, limit=100)
+    
+    # Filter cases from last 30 days
+    cases = [c for c in all_cases if c.created_at >= thirty_days_ago]
 
     by_date: dict[str, dict] = {}
     for c in cases:

@@ -236,7 +236,9 @@ class CustomerResponse(BaseModel):
     name: str
     email: Optional[str] = None
     phone: Optional[str] = None
-    opted_out: bool
+    opted_out: bool = False
+    total_paid_amount: float = 0.0
+    open_recovery_cases: int = 0
     created_at: datetime
 
 

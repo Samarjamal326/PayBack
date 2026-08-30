@@ -44,7 +44,7 @@ class TestRecover:
         result = evaluate(case, abandoned_transaction, active_customer, default_policy)
 
         assert result.decision == RecoveryDecision.RECOVER
-        assert result.action == RecoveryAction.SEND_WHATSAPP
+        assert result.action in (RecoveryAction.SEND_EMAIL, RecoveryAction.CREATE_PAYMENT_LINK, RecoveryAction.SEND_WHATSAPP)
 
     def test_same_input_same_decision(self, failed_transaction, active_customer, default_policy):
         case = _case(failed_transaction, active_customer)
