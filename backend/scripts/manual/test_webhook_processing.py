@@ -1,6 +1,10 @@
 """
 Test webhook processing logic directly with real transaction data.
 """
+import os
+import sys
+# Add backend app directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from app.services.recovery import RecoveryService
 from app.services.razorpay.webhook import process_razorpay_webhook_event
 from app.repositories.factory import get_repository_bundle

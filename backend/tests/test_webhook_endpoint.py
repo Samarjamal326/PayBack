@@ -40,7 +40,7 @@ def sample_transaction_data():
     """Sample failed transaction data for testing."""
     customer = Customer(name="Test Customer", email="test@example.com")
     transaction = Transaction(
-        id="tx_webhook_test_001",
+        id="tx_webhook_integration_001",
         customer_id=customer.id,
         amount=1000.0,
         status=TransactionStatus.FAILED,

@@ -4,6 +4,9 @@ Tests the complete payment → failure → recovery workflow with improved error
 """
 
 import sys
+import os
+# Add backend app directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from app.services.razorpay.webhook import get_human_readable_error, RAZORPAY_ERROR_MAPPING
 
 def test_error_message_improvements():

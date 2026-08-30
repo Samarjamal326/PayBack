@@ -21,11 +21,11 @@
 ### 4. Created Email Configuration Guide
 - **Issue:** Emails not reaching customer inbox due to Resend test domain limitations
 - **Fix:** Created comprehensive setup guide with multiple email configuration options
-- **Files Created:** `SETUP_GUIDE.md`, `backend/.env.example`
+- **Files Created:** `docs/setup/SETUP_GUIDE.md`, `backend/.env.example`
 
 ### 5. Created Testing Scripts
-- **Email Configuration Test:** `backend/test_email_config.py` - Test email delivery setup
-- **Payment Workflow Test:** `backend/test_payment_workflow.py` - Test error handling improvements
+- **Email Configuration Test:** `backend/scripts/manual/test_email_config.py` - Test email delivery setup
+- **Payment Workflow Test:** `backend/scripts/manual/test_payment_workflow.py` - Test error handling improvements
 - **Test Results:** All workflow tests passed ✅
 
 ## 🔧 Current System Status
@@ -122,10 +122,10 @@ These will update automatically when you have successful payments/recoveries.
 - `backend/app/services/razorpay/webhook.py` - Added error code mapping
 
 ### Created Files:
-- `SETUP_GUIDE.md` - Comprehensive email configuration guide
+- `docs/setup/SETUP_GUIDE.md` - Comprehensive email configuration guide
 - `backend/.env.example` - Environment configuration template
-- `backend/test_email_config.py` - Email configuration test script
-- `backend/test_payment_workflow.py` - Workflow test script
+- `backend/scripts/manual/test_email_config.py` - Email configuration test script
+- `backend/scripts/manual/test_payment_workflow.py` - Workflow test script
 - `IMPLEMENTATION_SUMMARY.md` - This summary document
 
 ## 🐛 Known Issues & Solutions
@@ -155,7 +155,7 @@ These will update automatically when you have successful payments/recoveries.
 If you encounter issues:
 1. Check backend logs for detailed error messages
 2. Run test scripts to verify configuration
-3. Review SETUP_GUIDE.md for troubleshooting steps
+3. Review docs/setup/SETUP_GUIDE.md for troubleshooting steps
 4. Ensure environment variables are set correctly
 
 The core payment → failure → recovery workflow is now fully functional with improved error handling. Email configuration is the final step to complete the end-to-end testing.

@@ -5,6 +5,8 @@ Run this to verify your email configuration is working correctly.
 
 import os
 import sys
+# Add backend app directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from app.config import settings
 from app.services.messaging.factory import get_delivery_provider
 

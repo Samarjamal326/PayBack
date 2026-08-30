@@ -406,7 +406,7 @@ flowchart LR
 PayBack supports **in-memory repositories** (default) and **Supabase PostgreSQL** (optional). Schema is split across:
 
 - `data/schemas/supabase.sql` — Phase 2 core tables
-- `backend/migrations/001_phase4_production_readiness.sql` — Phase 4 extensions
+- `supabase/migrations/001_phase4_production_readiness.sql` — Phase 4 extensions
 
 ### Tables
 
@@ -961,7 +961,7 @@ ollama pull qwen2.5:3b
 ### 5. Optional: Supabase
 
 1. Create a Supabase project (free tier).
-2. Run `data/schemas/supabase.sql` then `backend/migrations/001_phase4_production_readiness.sql`.
+2. Run `data/schemas/supabase.sql` then `supabase/migrations/001_phase4_production_readiness.sql`.
 3. Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` in `.env`.
 4. Set `PAYBACK_ENV=production` to activate Supabase repositories.
 
@@ -1137,7 +1137,7 @@ Realistic remaining work based on current gaps:
 - [docs/architecture/overview.md](docs/architecture/overview.md) — Phase 2 recovery loop and API boundaries
 - [docs/architecture/phase4.md](docs/architecture/phase4.md) — Phase 4 auth, messaging, idempotency design
 - [data/schemas/supabase.sql](data/schemas/supabase.sql) — Base PostgreSQL schema
-- [backend/migrations/001_phase4_production_readiness.sql](backend/migrations/001_phase4_production_readiness.sql) — Phase 4 migration
+- [supabase/migrations/001_phase4_production_readiness.sql](supabase/migrations/001_phase4_production_readiness.sql) — Phase 4 migration
 
 ---
 
@@ -1151,7 +1151,7 @@ This README was generated from direct repository inspection.
 
 **Tables added:** Architecture layers, ML features, ML artifacts, customer history, LLM providers, messaging providers, database tables, API endpoints, recovery actions, observability, environment variables, project structure, security controls, project status, limitations.
 
-**Repository areas inspected:** `backend/app/` (api, agent, core, models, repositories, services, evaluation), `backend/tests/`, `backend/migrations/`, `ml/`, `frontend/`, `docs/`, `data/schemas/`, `pyproject.toml`, `backend/requirements.txt`, `frontend/package.json`, `.env.example`.
+**Repository areas inspected:** `backend/app/` (api, agent, core, models, repositories, services, evaluation), `backend/tests/`, `supabase/migrations/`, `ml/`, `frontend/`, `docs/`, `data/schemas/`, `pyproject.toml`, `backend/requirements.txt`, `frontend/package.json`, `.env.example`.
 
 **Claims intentionally omitted:**
 
