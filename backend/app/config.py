@@ -72,6 +72,7 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "https://payback.vercel.app",
+        "https://inspiring-cranachan-9c8d4a.netlify.app",
     ]
 
     # Background Execution
