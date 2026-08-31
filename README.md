@@ -405,8 +405,8 @@ flowchart LR
 
 PayBack supports **in-memory repositories** (default) and **Supabase PostgreSQL** (optional). Schema is split across:
 
-- `data/schemas/supabase.sql` — Phase 2 core tables
-- `supabase/migrations/001_phase4_production_readiness.sql` — Phase 4 extensions
+- `database/schema/supabase.sql` — Phase 2 core tables
+- `database/supabase/migrations/001_phase4_production_readiness.sql` — Phase 4 extensions
 
 ### Tables
 
