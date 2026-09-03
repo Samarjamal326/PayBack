@@ -33,7 +33,7 @@ function SignInForm() {
     setError(null)
     setLoading(true)
     try {
-      await login('admin@payback.io', 'demo-password')
+      await login('demo@payback.io', 'demo-password')
       router.push('/dashboard')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Demo sign in failed.')
@@ -85,7 +85,7 @@ function SignInForm() {
         <button className="button-secondary demo-button" type="button" onClick={handleDemoLogin} disabled={loading}>
           Use demo account
         </button>
-        <p className="demo-hint">admin@payback.io · Pre-loaded demo data</p>
+        <p className="demo-hint">demo@payback.io · Pre-loaded demo data</p>
 
         <div className="auth-switch">
           New to PayBack? <Link href="/sign-up">Create an account</Link>

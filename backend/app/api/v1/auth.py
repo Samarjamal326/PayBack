@@ -51,6 +51,19 @@ def register_merchant(payload: RegisterRequest) -> AuthResponse:
 @router.post("/login", response_model=AuthResponse)
 def login_merchant(payload: LoginRequest) -> AuthResponse:
     merchant = _repos.merchants.get_by_email(payload.email)
+    
+    # Special handling for demo account - auto-create if doesn't exist
+    if not merchant and payload.email == "demo@payback.io":
+        merchant = Merchant(
+            id="merchant_demo",
+            name="PayBack Demo Store",
+            email="demo@payback.io",
+            phone="+919876543210",
+            timezone="Asia/Kolkata",
+        )
+        merchant = _repos.merchants.save(merchant)
+        _ensure_merchant_settings(merchant.id)
+    
     if not merchant:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
