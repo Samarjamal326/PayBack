@@ -144,28 +144,60 @@ export function formatRecoveryStatus(status: string): string {
   return statusMap[status] || status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+function simplifyId(idStr: string, prefix: string = 'ID'): string {
+  if (!idStr) return 'N/A'
+  
+  // For UUIDs, take first 8 characters
+  if (idStr.length === 36 && idStr.split('-').length === 5) {
+    const shortId = idStr.substring(0, 8).toUpperCase()
+    return `#${prefix}-${shortId}`
+  }
+  
+  // For Razorpay/order IDs, extract the meaningful part
+  if (idStr.startsWith('order_')) {
+    const shortId = idStr.replace('order_', '').substring(0, 8).toUpperCase()
+    return `#${prefix}-${shortId}`
+  }
+  if (idStr.startsWith('plink_')) {
+    const shortId = idStr.replace('plink_', '').substring(0, 8).toUpperCase()
+    return `#${prefix}-${shortId}`
+  }
+  
+  // For other IDs, just shorten
+  const shortId = idStr.substring(0, 8).toUpperCase()
+  return `#${prefix}-${shortId}`
+}
+
 export function formatAuditRecord(record: AuditRecord): { title: string; description: string } {
   const event = record.eventType
   const detail = record.detail || ''
 
   const eventTitleMap: Record<string, string> = {
     payment_failed: 'Payment Failed',
-    recovery_case_created: 'Recovery Case Initialized',
-    eligibility_checked: 'Eligibility Verified',
-    action_selected: 'Recovery Action Selected',
-    payment_link_created: 'Recovery Link Generated',
-    decision_made: 'Strategy Determined',
-    payment_succeeded: 'Payment Recovered',
-    recovery_completed: 'Case Closed · Recovered',
-    recovery_stopped: 'Recovery Concluded',
-    recovery_escalated: 'Escalated for Team Review',
-    message_sent: 'Customer Reminder Sent',
+    recovery_case_created: 'Recovery Started',
+    eligibility_checked: 'Eligibility Checked',
+    action_selected: 'Action Taken',
+    payment_link_created: 'Payment Link Sent',
+    decision_made: 'AI Decision',
+    payment_succeeded: 'Payment Received',
+    recovery_completed: 'Recovery Complete',
+    recovery_stopped: 'Recovery Stopped',
+    recovery_escalated: 'Escalated',
+    message_sent: 'Reminder Sent',
   }
 
   const title = eventTitleMap[event] || event.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 
-  // Clean up detail to be user-friendly without raw JSON / hashes
+  // Backend provides simplified descriptions, just clean up any remaining technical details
   let description = detail
+    .replace(/payment_id=pay_[a-zA-Z0-9]+/gi, 'payment confirmed')
+    .replace(/payment_link\.paid/gi, 'payment link paid')
+    .replace(/order\.paid/gi, 'order paid')
+    .replace(/payment\.captured/gi, 'payment captured')
+    .replace(/Razorpay Test Webhook/gi, '')
+    .replace(/\(\s*\)/gi, '')
+    .replace(/\s+/g, ' ').trim()
+
   if (event === 'payment_failed') {
     description = 'The transaction was declined by the customer’s payment provider.'
   } else if (event === 'recovery_case_created') {
@@ -186,6 +218,21 @@ export function formatAuditRecord(record: AuditRecord): { title: string; descrip
     description = 'ML model determined highest-conversion recovery pathway.'
   } else if (event === 'payment_succeeded' || event === 'recovery_completed') {
     description = 'Customer completed payment successfully. Funds captured.'
+  } else {
+    // For any other events, clean up any remaining IDs in the detail with proper prefixes
+    description = detail
+      .replace(/tx '([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})'/gi, (match, uuid) => simplifyId(uuid, 'TX'))
+      .replace(/case '([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})'/gi, (match, uuid) => simplifyId(uuid, 'RC'))
+      .replace(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/gi, (match) => simplifyId(match, 'ID'))
+      .replace(/order_[a-zA-Z0-9]+/gi, (match) => simplifyId(match, 'ORDER'))
+      .replace(/plink_[a-zA-Z0-9]+/gi, (match) => simplifyId(match, 'LINK'))
+      .replace(/payment_id=pay_[a-zA-Z0-9]+/gi, 'payment confirmed')
+      .replace(/payment_link\.paid/gi, 'payment link paid')
+      .replace(/order\.paid/gi, 'order paid')
+      .replace(/payment\.captured/gi, 'payment captured')
+      .replace(/Razorpay Test Webhook/gi, '')
+      .replace(/\(\s*\)/gi, '')
+      .replace(/\s+/g, ' ').trim()
   }
 
   return { title, description }
@@ -572,11 +619,11 @@ function RecoveryTable({
       }
 
       const rows = dataToExport.map((r: any) => [
-        escapeCSV(r.id),
-        escapeCSV(r.customerId),
+        escapeCSV(simplifyId(r.id, 'RC')),
+        escapeCSV(simplifyId(r.customerId, 'CUST')),
         escapeCSV(r.customerName || r.customer || 'Unknown'),
         escapeCSV(r.customerEmail || r.email || 'Unknown'),
-        escapeCSV(r.transactionId || 'N/A'),
+        escapeCSV(simplifyId(r.transactionId || 'N/A', 'TX')),
         r.amountAtRisk ?? r.amount ?? 0,
         escapeCSV(r.paymentStatus || 'Unknown'),
         escapeCSV(r.status),
@@ -608,7 +655,7 @@ function RecoveryTable({
       // Fallback to local list
       const headers = ['Case ID', 'Customer', 'Email', 'Amount (INR)', 'Status', 'Reason', 'Created']
       const rows = recoveriesList.map((r) => [
-        `"${r.id}"`,
+        `"${simplifyId(r.id, 'RC')}"`,
         `"${r.customer}"`,
         `"${r.email}"`,
         r.amount,
@@ -670,7 +717,7 @@ function RecoveryTable({
                       </span>
                       <span>
                         <b>{r.customer}</b>
-                        <small>{r.id.slice(0, 16)}</small>
+                        <small>{simplifyId(r.id, 'RC')}</small>
                       </span>
                     </Link>
                   </td>
@@ -948,7 +995,7 @@ function NewPaymentDialog({
           recs.map((r) => {
             const custInfo = customerMap.get(r.customerId)
             const custName = custInfo?.name || (r.customerId.includes('-') ? 'Rahul Verma' : r.customerId.replace('cus_', '').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()))
-            const custEmail = custInfo?.email || 'customer@example.com'
+            const custEmail = custInfo?.email || `${simplifyId(r.customerId, 'CUST')}@example.com`
             return {
               id: r.id,
               customerId: r.customerId,
@@ -1446,7 +1493,7 @@ function Dashboard({ user }: { user?: { name: string; email: string } | null }) 
                 id: r.id,
                 customerId: r.customerId,
                 customer: custInfo?.name || r.customerId.replace('cus_', '').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) || 'Customer',
-                email: custInfo?.email || `${r.customerId}@example.com`,
+                email: custInfo?.email || `${simplifyId(r.customerId, 'CUST')}@example.com`,
                 amount: r.amountAtRisk,
                 status: formatRecoveryStatus(r.status),
                 reason: r.reason,
@@ -1704,7 +1751,7 @@ function Detail({ id }: { id: string }) {
         <div className="panel" style={{ padding: '32px', textAlign: 'center' }}>
           <h2>Recovery Case Not Found</h2>
           <p className="text-muted-foreground mt-2 mb-4">
-            {error || `No recovery case was found with ID '${id}' in your workspace.`}
+            {error || `No recovery case was found with ID '${simplifyId(id, 'RC')}' in your workspace.`}
           </p>
           <Link href="/recoveries" className="button-primary">
             Return to Recoveries
@@ -1726,7 +1773,7 @@ function Detail({ id }: { id: string }) {
   const strokeDashoffset = circumference - (prob / 100) * circumference
 
   const customerDisplayName = customer?.name || 'Customer'
-  const customerEmailDisplay = customer?.email || (caseData.customerId ? `${caseData.customerId}@example.com` : 'N/A')
+  const customerEmailDisplay = customer?.email || (caseData.customerId ? `${simplifyId(caseData.customerId, 'CUST')}@example.com` : 'N/A')
 
   return (
     <>
@@ -1735,7 +1782,7 @@ function Detail({ id }: { id: string }) {
       </Link>
       <PageIntro
         title={customerDisplayName}
-        subtitle={`${id} · Created ${new Date(caseData.createdAt).toLocaleString()}`}
+        subtitle={`${simplifyId(id, 'RC')} · Created ${new Date(caseData.createdAt).toLocaleString()}`}
         action={<Status status={statusStr} />}
       />
       <div className="detail-grid">
@@ -2202,7 +2249,7 @@ function Customers() {
                     <td>
                       <Link href={`/recoveries/${r.id}`} className="customer-link">
                         <b>{r.customerId.replace('cus_', '').replace(/_/g, ' ')}</b>
-                        <small>{r.customerId}</small>
+                        <small>{simplifyId(r.customerId, 'CUST')}</small>
                       </Link>
                     </td>
                     <td>{formatINR(r.amountAtRisk)}</td>
@@ -2321,8 +2368,8 @@ function CustomerDetail({ id }: { id: string }) {
       </Link>
       <PageIntro
         title={customer.name}
-        subtitle={`${customer.email || `${customer.id}@example.com`} · Customer since ${customer.createdAt ? new Date(customer.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'N/A'}`}
-        action={<span className="status status-neutral">{customer.id}</span>}
+        subtitle={`${customer.email || `${simplifyId(customer.id, 'CUST')}@example.com`} · Customer since ${customer.createdAt ? new Date(customer.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'N/A'}`}
+        action={<span className="status status-neutral">{simplifyId(customer.id, 'CUST')}</span>}
       />
       <div className="metric-grid">
         <Metric label="Lifetime value" value={formatINR(lifetime)} change="Live" note={`${metrics.successfulPayments} paid`} />
@@ -2396,7 +2443,7 @@ function CustomerDetail({ id }: { id: string }) {
           </div>
           <div className="side-row">
             <span>Customer ID</span>
-            <b style={{ fontSize: '11px' }}>{customer.id}</b>
+            <b style={{ fontSize: '11px' }}>{simplifyId(customer.id, 'CUST')}</b>
           </div>
           <div className="side-row">
             <span>Historical success</span>
@@ -2433,7 +2480,7 @@ function CustomerDetail({ id }: { id: string }) {
                   <tr key={r.id}>
                     <td>
                       <Link href={`/recoveries/${r.id}`} className="customer-link">
-                        <b>{r.id.slice(0, 16)}</b>
+                        <b>{simplifyId(r.id, 'RC')}</b>
                       </Link>
                     </td>
                     <td>{formatINR(r.amountAtRisk)}</td>
@@ -2708,7 +2755,7 @@ export default function PayBackApp({ view = 'dashboard', id }: { view?: string; 
             recs.value.map((r) => {
               const custInfo = customerMap.get(r.customerId)
               const custName = custInfo?.name || (r.customerId.includes('-') ? 'Rahul Verma' : r.customerId.replace('cus_', '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()))
-              const custEmail = custInfo?.email || 'customer@example.com'
+              const custEmail = custInfo?.email || `${simplifyId(r.customerId, 'CUST')}@example.com`
               return {
                 id: r.id,
                 customerId: r.customerId,

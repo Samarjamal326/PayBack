@@ -13,9 +13,10 @@ from app.models.domain import (
     RecoveryCase,
     RecoveryOutcome,
     RecoveryStatus,
+    TransactionStatus,
     WebhookProcessingStatus,
 )
-from app.services.recovery import RecoveryService
+from app.services.recovery import RecoveryService, simplify_id
 
 logger = logging.getLogger(__name__)
 
@@ -215,11 +216,21 @@ def _handle_payment_success(
     # Check if there's an existing recovery case for this transaction
     case = recovery_service.get_case_by_transaction_id(transaction.id)
     if case:
+        # Skip if already recovered to prevent duplicate events
+        if case.status == RecoveryStatus.RECOVERED:
+            return WebhookResult(
+                processed=True,
+                event=event_type,
+                message=f"Case '{case.id}' already recovered (duplicate webhook event).",
+                case_id=case.id,
+                is_duplicate=True,
+            )
+        
         # Recover the existing case
         recovered_case = recovery_service.mark_case_recovered(
             case_id=case.id,
             amount_recovered=amount_inr if amount_inr > 0 else case.amount_at_risk,
-            detail=f"Payment succeeded via Razorpay Test Webhook ({event_type}, payment_id={payment_id})",
+            detail=f"Payment of INR {amount_inr if amount_inr > 0 else case.amount_at_risk:,.2f} received successfully",
         )
 
         return WebhookResult(
@@ -302,12 +313,12 @@ def _handle_payment_failure_or_expiry(
         recovery_service.record_audit_event(
             case_id=existing_case.id,
             event_type=AuditEventType.RECOVERY_STOPPED if "cancelled" in event_type or "expired" in event_type else AuditEventType.PAYMENT_FAILED,
-            detail=f"Razorpay webhook event '{event_type}' received. Payment failed: {failure_reason}",
+            detail=f"Payment failed: {failure_reason}",
         )
         return WebhookResult(
             processed=True,
             event=event_type,
-            message=f"Recorded '{event_type}' for existing case '{existing_case.id}'.",
+            message=f"Recorded '{event_type}' for existing case {simplify_id(existing_case.id, 'RC')}.",
             case_id=existing_case.id,
         )
 

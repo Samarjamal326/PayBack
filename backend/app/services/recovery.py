@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import MutableMapping
 from datetime import datetime, timezone
 from typing import Any, Iterator, Optional
@@ -33,6 +34,29 @@ from app.services.actions.stubs import (
 from app.services.messaging.interfaces import DeliveryProviderAdapter
 from app.services.llm.huggingface import HuggingFaceMessageGenerator
 from app.services.llm.mock import MockMessageGenerator
+
+
+def simplify_id(id_str: str, prefix: str = "ID") -> str:
+    """Convert a complex ID to a merchant-friendly short ID."""
+    if not id_str:
+        return "N/A"
+    
+    # For UUIDs, take first 8 characters
+    if len(id_str) == 36 and id_str.count('-') == 4:
+        short_id = id_str[:8].upper()
+        return f"#{prefix}-{short_id}"
+    
+    # For Razorpay/order IDs, extract the meaningful part
+    if id_str.startswith('order_'):
+        short_id = id_str.replace('order_', '')[:8].upper()
+        return f"#{prefix}-{short_id}"
+    if id_str.startswith('plink_'):
+        short_id = id_str.replace('plink_', '')[:8].upper()
+        return f"#{prefix}-{short_id}"
+    
+    # For other IDs, just shorten
+    short_id = id_str[:8].upper()
+    return f"#{prefix}-{short_id}"
 
 
 class _RepoDictProxy(MutableMapping):
@@ -200,12 +224,12 @@ class RecoveryService:
         self.record_audit_event(
             case_id=case.id,
             event_type=AuditEventType.PAYMENT_FAILED,
-            detail=f"Payment failed for tx '{transaction.id}' amount {transaction.currency.value} {transaction.amount:,.2f}. Reason: {case.reason}",
+            detail=f"Payment of {transaction.currency.value} {transaction.amount:,.2f} failed. {case.reason.replace('_', ' ').title()}",
         )
         self.record_audit_event(
             case_id=case.id,
             event_type=AuditEventType.RECOVERY_CASE_CREATED,
-            detail=f"Recovery case '{case.id}' created with status DETECTED.",
+            detail=f"Recovery case started for payment {simplify_id(transaction.id, 'TX')}",
         )
 
         return case
@@ -227,7 +251,7 @@ class RecoveryService:
         self.record_audit_event(
             case_id=case.id,
             event_type=AuditEventType.ELIGIBILITY_CHECKED,
-            detail=f"Checking eligibility: opt_out={customer.opted_out}, retry_count={case.retry_count}",
+            detail=f"Checked customer eligibility for recovery",
         )
 
         initial_state: RecoveryState = {
@@ -251,13 +275,13 @@ class RecoveryService:
             self.record_audit_event(
                 case_id=case.id,
                 event_type=AuditEventType.ACTION_SELECTED,
-                detail=f"Action '{action_rec.action.value}' executed with detail: {action_rec.detail}",
+                detail=f"Payment link sent to customer",
             )
             if action_rec.action == RecoveryAction.CREATE_PAYMENT_LINK:
                 self.record_audit_event(
                     case_id=case.id,
                     event_type=AuditEventType.PAYMENT_LINK_CREATED,
-                    detail=f"Test Payment Link created: {action_rec.external_ref or 'N/A'}",
+                    detail=f"Secure payment link generated",
                 )
 
         # Audit decision / terminal state
@@ -265,7 +289,7 @@ class RecoveryService:
             self.record_audit_event(
                 case_id=case.id,
                 event_type=AuditEventType.DECISION_MADE,
-                detail=f"Decision '{updated_case.decision.value}' made. Action: '{updated_case.selected_action.value if updated_case.selected_action else 'None'}'. Probability: {updated_case.recovery_probability:.0%}",
+                detail=f"AI decision: {updated_case.decision.value.replace('_', ' ').title()} ({math.round(updated_case.recovery_probability * 100)}% success rate)",
             )
 
         if updated_case.status == RecoveryStatus.STOPPED:
@@ -320,15 +344,13 @@ class RecoveryService:
         self.record_audit_event(
             case_id=case_id,
             event_type=AuditEventType.PAYMENT_SUCCEEDED,
-            detail=f"Payment confirmed for INR {amount_recovered:,.2f}. {detail}",
+            detail=detail,
         )
         self.record_audit_event(
             case_id=case_id,
             event_type=AuditEventType.RECOVERY_COMPLETED,
-            detail=f"Recovery case '{case_id}' fully completed with outcome RECOVERED.",
+            detail=f"Recovery completed successfully",
         )
-
-        return recovered_case
 
         return recovered_case
 
